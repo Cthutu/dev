@@ -174,6 +174,8 @@ internal void _fs_update_frame(Frame* frame)
 
 void fs_init(FrameSystem* fs)
 {
+    temp_arena_init();
+
     Display* display = XOpenDisplay(NULL);
     if (!display) {
         kill("Failed to open X display");
@@ -295,6 +297,7 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
         array_free(fs->frames);
         array_free(fs->events);
         XCloseDisplay(fs->x_display);
+        temp_arena_done();
         return false;
     }
 
