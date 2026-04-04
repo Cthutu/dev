@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import queue
-import shutil
 import subprocess
 import sys
 import threading
@@ -14,6 +13,15 @@ from typing import Any, NamedTuple
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from rich.table import Table
 
 from common import (
@@ -110,7 +118,9 @@ def discover_test_targets() -> list[TestTarget]:
     names = [target.name for target in targets]
     if len(names) != len(set(names)):
         duplicates = sorted({name for name in names if names.count(name) > 1})
-        raise SystemExit(colour(f"Duplicate test target names: {', '.join(duplicates)}", RED))
+        raise SystemExit(
+            colour(f"Duplicate test target names: {', '.join(duplicates)}", RED)
+        )
     return targets
 
 
@@ -134,7 +144,9 @@ def executable_path(test_name: str, profile: str) -> Path:
     return BIN_DIR / f"{test_name}{suffix}{extension}"
 
 
-def reader_thread(stream, channel: str, out_queue: queue.Queue[tuple[str, str]]) -> None:
+def reader_thread(
+    stream, channel: str, out_queue: queue.Queue[tuple[str, str]]
+) -> None:
     try:
         for line in iter(stream.readline, ""):
             out_queue.put((channel, line.rstrip("\n")))
@@ -142,25 +154,18 @@ def reader_thread(stream, channel: str, out_queue: queue.Queue[tuple[str, str]])
         stream.close()
 
 
-def print_progress(completed: int, total: int, running: str) -> None:
-    width = 24
-    filled = 0 if total == 0 else int(width * completed / total)
-    bar = "#" * filled + "-" * (width - filled)
-    line = f"{prefix('test', YELLOW)} [{bar}] {completed}/{total} {running}"
-    terminal_width = shutil.get_terminal_size(fallback=(120, 20)).columns
-    if len(line) > terminal_width - 1:
-        line = line[: max(0, terminal_width - 1)]
-    sys.stderr.write("\r" + line.ljust(max(terminal_width - 1, len(line))))
-    sys.stderr.flush()
+def section_break() -> None:
+    print()
 
 
-def clear_progress() -> None:
-    terminal_width = shutil.get_terminal_size(fallback=(120, 20)).columns
-    sys.stderr.write("\r" + " " * max(terminal_width - 1, 1) + "\r")
-    sys.stderr.flush()
-
-
-def run_test_binary(executable: Path, module_name: str, runner_args: list[str]) -> ModuleResult:
+def run_test_binary(
+    executable: Path,
+    module_name: str,
+    runner_args: list[str],
+    progress: Progress,
+    overall_task_id: int,
+    module_task_id: int,
+) -> ModuleResult:
     result = ModuleResult(name=module_name, executable=executable)
     cmd = [str(executable), *runner_args]
     process = subprocess.Popen(
@@ -172,8 +177,12 @@ def run_test_binary(executable: Path, module_name: str, runner_args: list[str]) 
     )
 
     event_queue: queue.Queue[tuple[str, str]] = queue.Queue()
-    stdout_thread = threading.Thread(target=reader_thread, args=(process.stdout, "stdout", event_queue))
-    stderr_thread = threading.Thread(target=reader_thread, args=(process.stderr, "stderr", event_queue))
+    stdout_thread = threading.Thread(
+        target=reader_thread, args=(process.stdout, "stdout", event_queue)
+    )
+    stderr_thread = threading.Thread(
+        target=reader_thread, args=(process.stderr, "stderr", event_queue)
+    )
     stdout_thread.start()
     stderr_thread.start()
 
@@ -184,7 +193,11 @@ def run_test_binary(executable: Path, module_name: str, runner_args: list[str]) 
         try:
             channel, line = event_queue.get(timeout=0.05)
         except queue.Empty:
-            if process.poll() is not None and not stdout_thread.is_alive() and not stderr_thread.is_alive():
+            if (
+                process.poll() is not None
+                and not stdout_thread.is_alive()
+                and not stderr_thread.is_alive()
+            ):
                 active = 0
             continue
 
@@ -197,13 +210,22 @@ def run_test_binary(executable: Path, module_name: str, runner_args: list[str]) 
 
         if event.get("event") == "suite_start":
             expected_tests = int(event.get("selected_tests", 0))
-            print_progress(0, expected_tests or 1, module_name)
+            progress.update(
+                module_task_id,
+                total=max(expected_tests, 1),
+                completed=0,
+                visible=True,
+                description=f"[bold yellow]{module_name}[/bold yellow]",
+            )
         elif event.get("event") == "test_end":
             completed_tests += 1
-            print_progress(
-                completed_tests,
-                expected_tests or max(completed_tests, 1),
-                f"{module_name}:{event['category']}:{event['name']}",
+            progress.update(
+                module_task_id,
+                completed=completed_tests,
+                description=(
+                    f"[bold yellow]{module_name}[/bold yellow] "
+                    f"[cyan]{event['category']}:{event['name']}[/cyan]"
+                ),
             )
         elif event.get("event") == "suite_end":
             result.total_tests = int(event.get("total_tests", 0))
@@ -224,18 +246,32 @@ def run_test_binary(executable: Path, module_name: str, runner_args: list[str]) 
                 )
             )
 
-        if process.poll() is not None and not stdout_thread.is_alive() and not stderr_thread.is_alive():
+        if (
+            process.poll() is not None
+            and not stdout_thread.is_alive()
+            and not stderr_thread.is_alive()
+        ):
             active = 0
 
     stdout_thread.join()
     stderr_thread.join()
     result.exit_code = process.wait()
-    print_progress(expected_tests or completed_tests or 1, expected_tests or completed_tests or 1, module_name)
+    progress.update(
+        module_task_id,
+        total=max(expected_tests or completed_tests, 1),
+        completed=max(expected_tests or completed_tests, 1),
+        description=f"[bold green]{module_name} complete[/bold green]",
+    )
+    progress.advance(overall_task_id, 1)
+    progress.update(
+        overall_task_id,
+        description=f"[bold green]Modules[/bold green] ({module_name} done)",
+    )
     return result
 
 
 def print_module_table(results: list[ModuleResult]) -> None:
-    clear_progress()
+    section_break()
     table = Table(title="Test Modules", box=box.ROUNDED, header_style="bold cyan")
     table.add_column("Module", style="bold")
     table.add_column("Tests", justify="right")
@@ -244,7 +280,6 @@ def print_module_table(results: list[ModuleResult]) -> None:
     table.add_column("Assert", justify="right")
     table.add_column("A.Fail", justify="right")
     for result in results:
-        fail_colour = RED if result.failed_tests else GREEN
         fail_style = "red" if result.failed_tests else "green"
         afail_style = "red" if result.failed_assertions else "green"
         table.add_row(
@@ -259,9 +294,12 @@ def print_module_table(results: list[ModuleResult]) -> None:
 
 
 def print_failures(results: list[ModuleResult]) -> None:
-    failures = [(result.name, failure) for result in results for failure in result.failures]
+    failures = [
+        (result.name, failure) for result in results for failure in result.failures
+    ]
     if not failures:
         return
+    section_break()
     table = Table(title="Failures", box=box.ROUNDED, header_style="bold red")
     table.add_column("Module", style="bold")
     table.add_column("Test")
@@ -286,6 +324,7 @@ def print_aggregate_summary(results: list[ModuleResult]) -> None:
     total_assertions = sum(result.total_assertions for result in results)
     failed_assertions = sum(result.failed_assertions for result in results)
 
+    section_break()
     table = Table(title="Summary", box=box.ROUNDED, header_style="bold magenta")
     table.add_column("Metric", style="bold")
     table.add_column("Value", justify="right")
@@ -374,7 +413,10 @@ def main(argv: list[str] | None = None) -> None:
             continue
 
         if src.is_relative_to(TESTS_DIR):
-            extra_flags_by_source[src] = ["-DTEST", *[f"-D{define}" for define in root_defines[src]]]
+            extra_flags_by_source[src] = [
+                "-DTEST",
+                *[f"-D{define}" for define in root_defines[src]],
+            ]
             header_deps_by_source[src] = headers_for_source(src, TESTS_DIR, SRC_DIR)
             relative_roots[src] = ROOT
             local_build_roots[src] = TESTS_DIR
@@ -427,8 +469,36 @@ def main(argv: list[str] | None = None) -> None:
         runner_args = ["-t", args.test_filter]
 
     results: list[ModuleResult] = []
-    for module_name, executable in executables:
-        results.append(run_test_binary(executable, module_name, runner_args))
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}"),
+        BarColumn(bar_width=24),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=RICH_CONSOLE,
+        transient=True,
+    )
+    with progress:
+        overall_task_id = progress.add_task(
+            "[bold green]Modules[/bold green]",
+            total=max(len(executables), 1),
+        )
+        module_task_id = progress.add_task(
+            "[bold yellow]Waiting[/bold yellow]",
+            total=1,
+        )
+        for module_name, executable in executables:
+            results.append(
+                run_test_binary(
+                    executable,
+                    module_name,
+                    runner_args,
+                    progress,
+                    overall_task_id,
+                    module_task_id,
+                )
+            )
 
     print_module_table(results)
     print_failures(results)
