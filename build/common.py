@@ -96,6 +96,96 @@ def banner(profile: str, items: list[str], noun: str, cc: str) -> None:
     print(colour(bar, CYAN))
 
 
+def create_progress(*, transient: bool = True) -> Progress:
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}"),
+        BarColumn(bar_width=24),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=RICH_CONSOLE,
+        transient=transient,
+    )
+
+
+class BuildProgressTracker:
+    def __init__(self, total_targets: int, *, noun: str) -> None:
+        self.progress = create_progress(transient=True)
+        self.total_targets = max(total_targets, 1)
+        self.noun = noun
+        self.overall_task_id: int | None = None
+        self.current_task_id: int | None = None
+
+    def __enter__(self) -> "BuildProgressTracker":
+        self.progress.__enter__()
+        self.overall_task_id = self.progress.add_task(
+            f"[bold green]{self.noun}[/bold green] [grey70](0/{self.total_targets})[/grey70]",
+            total=self.total_targets,
+        )
+        self.current_task_id = self.progress.add_task(
+            "[bold yellow]Preparing[/bold yellow]",
+            total=1,
+        )
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.progress.__exit__(exc_type, exc, tb)
+
+    def start_target(self, name: str, total_steps: int, *, kind: str | None = None) -> None:
+        assert self.current_task_id is not None
+        assert self.overall_task_id is not None
+        completed = int(self.progress.tasks[self.overall_task_id].completed)
+        label = f"{name} {kind}" if kind else name
+        self.progress.update(
+            self.overall_task_id,
+            description=(
+                f"[bold green]{self.noun}[/bold green] "
+                f"[grey70]({completed}/{self.total_targets})[/grey70] "
+                f"[cyan]{label}[/cyan]"
+            ),
+        )
+        self.progress.update(
+            self.current_task_id,
+            total=max(total_steps, 1),
+            completed=0,
+            description=f"[bold yellow]{label}[/bold yellow]",
+        )
+
+    def step(self, description: str) -> None:
+        assert self.current_task_id is not None
+        self.progress.update(self.current_task_id, description=description)
+
+    def advance_step(self) -> None:
+        assert self.current_task_id is not None
+        self.progress.advance(self.current_task_id, 1)
+
+    def finish_target(self, name: str, *, had_work: bool) -> None:
+        assert self.current_task_id is not None
+        assert self.overall_task_id is not None
+        status = "complete" if had_work else "up to date"
+        colour_name = "green" if had_work else "grey70"
+        self.progress.update(
+            self.current_task_id,
+            total=1,
+            completed=1,
+            description=f"[bold {colour_name}]{name} {status}[/bold {colour_name}]",
+        )
+        self.progress.advance(self.overall_task_id, 1)
+        completed = int(self.progress.tasks[self.overall_task_id].completed)
+        self.progress.update(
+            self.overall_task_id,
+            description=(
+                f"[bold green]{self.noun}[/bold green] "
+                f"[grey70]({completed}/{self.total_targets})[/grey70]"
+            ),
+        )
+
+
+def section_break() -> None:
+    print()
+
+
 def unique(seq: Iterable[Path]) -> list[Path]:
     seen: set[Path] = set()
     ordered: list[Path] = []
