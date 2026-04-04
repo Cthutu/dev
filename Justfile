@@ -2,7 +2,7 @@ default:
     just --list
 
 python-env:
-    uv --directory build sync
+    @uv -q --no-progress --directory build sync
 
 build *args: python-env
     build/.venv/bin/python build/build.py {{args}}
