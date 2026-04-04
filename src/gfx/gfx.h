@@ -234,4 +234,7 @@ void fs_update(Frame* frame);
 // frame system.  The FrameSystem instance itself will be cleaned up and
 // cannot be used again.
 //
+// Because this is a main loop, it will call `temp_arena_reset()` each time it
+// is called.
+//
 bool fs_loop(FrameSystem* fs, FrameEvent* event);
