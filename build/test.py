@@ -509,4 +509,8 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except CommandFailure as error:
+        print_command_failure(error)
+        raise SystemExit(error.returncode)
