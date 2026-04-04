@@ -33,6 +33,14 @@ int run(int argc, char** argv)
             }
             break;
 
+        case FE_MOVE:
+            prn("Window moved to %d, %d", event.x, event.y);
+            break;
+
+        case FE_RESIZE:
+            prn("Window resized to %d x %d", event.width, event.height);
+            break;
+
         case FE_CLOSE:
             prn("Window closed!");
             break;
