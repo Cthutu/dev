@@ -37,6 +37,7 @@ from common import (
     config_deps_for_sections,
     executable_needs_relink,
     expand_sections,
+    fit_progress_label,
     headers_for_source,
     libs_for_sections,
     link_executable,
@@ -222,16 +223,15 @@ def run_test_binary(
                 total=max(expected_tests, 1),
                 completed=0,
                 visible=True,
-                description=f"[bold yellow]{module_name}[/bold yellow]",
+                description=fit_progress_label(module_name),
             )
         elif event.get("event") == "test_end":
             completed_tests += 1
             progress.update(
                 module_task_id,
                 completed=completed_tests,
-                description=(
-                    f"[bold yellow]{module_name}[/bold yellow] "
-                    f"[cyan]{event['category']}:{event['name']}[/cyan]"
+                description=fit_progress_label(
+                    f"{module_name} {event['category']}:{event['name']}"
                 ),
             )
         elif event.get("event") == "suite_end":
@@ -267,12 +267,12 @@ def run_test_binary(
         module_task_id,
         total=max(expected_tests or completed_tests, 1),
         completed=max(expected_tests or completed_tests, 1),
-        description=f"[bold green]{module_name} complete[/bold green]",
+        description=fit_progress_label(f"{module_name} complete"),
     )
     progress.advance(overall_task_id, 1)
     progress.update(
         overall_task_id,
-        description=f"[bold green]Modules[/bold green] ({module_name} done)",
+        description=fit_progress_label(f"Modules ({module_name} done)"),
     )
     return result
 
@@ -551,11 +551,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     with progress:
         overall_task_id = progress.add_task(
-            "[bold green]Modules[/bold green]",
+            fit_progress_label("Modules"),
             total=max(len(executables), 1),
         )
         module_task_id = progress.add_task(
-            "[bold yellow]Waiting[/bold yellow]",
+            fit_progress_label("Waiting"),
             total=1,
         )
         for module_name, executable in executables:
