@@ -512,6 +512,7 @@ def compile_source(
     header_deps: Iterable[Path] = (),
     extra_deps: Iterable[Path] = (),
     local_build_root: Path | None = None,
+    announce: bool = True,
 ) -> tuple[Path, bool]:
     obj = obj_path(src, obj_dir, relative_to)
     obj.parent.mkdir(parents=True, exist_ok=True)
@@ -526,9 +527,26 @@ def compile_source(
         return obj, True
 
     cmd = [cc, *cflags, *extra_flags, *include_flags, "-c", str(src), "-o", str(obj)]
-    print(f"{prefix('cc', GREEN)} {src.relative_to(display_root)}")
+    if announce:
+        print(f"{prefix('cc', GREEN)} {src.relative_to(display_root)}")
     run_command(cmd)
     return obj, False
+
+
+def executable_needs_relink(
+    executable: Path,
+    objects: list[Path],
+    *,
+    extra_deps: Iterable[Path] = (),
+) -> bool:
+    if not executable.exists():
+        return True
+
+    exe_mtime = executable.stat().st_mtime
+    dep_times = [obj.stat().st_mtime for obj in objects]
+    dep_times.extend(dep.stat().st_mtime for dep in extra_deps if dep.exists())
+    newest_dep = max(dep_times, default=exe_mtime)
+    return exe_mtime < newest_dep
 
 
 def link_executable(
@@ -540,20 +558,18 @@ def link_executable(
     objects: list[Path],
     executable: Path,
     extra_deps: Iterable[Path] = (),
+    announce: bool = True,
 ) -> None:
     bin_dir.mkdir(parents=True, exist_ok=True)
 
-    if executable.exists():
-        exe_mtime = executable.stat().st_mtime
-        dep_times = [obj.stat().st_mtime for obj in objects]
-        dep_times.extend(dep.stat().st_mtime for dep in extra_deps if dep.exists())
-        newest_dep = max(dep_times, default=exe_mtime)
-        if exe_mtime >= newest_dep:
+    if not executable_needs_relink(executable, objects, extra_deps=extra_deps):
+        if announce:
             print(f"{prefix('skip', GREY)} {executable.relative_to(root)} (up to date)")
-            return
+        return
 
     cmd = [cc, "-o", str(executable), *objects, *ldflags]
-    print(f"{prefix('link', YELLOW)} {executable.relative_to(root)}")
+    if announce:
+        print(f"{prefix('link', YELLOW)} {executable.relative_to(root)}")
     run_command(cmd)
 
 
