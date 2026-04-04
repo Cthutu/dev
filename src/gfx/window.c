@@ -114,8 +114,15 @@ internal u64 _fs_create_frame(const Frame* frame)
     XMapWindow(fs->x_display, new_frame);
     u64 handle     = fs->next_handle++;
 
+    // Register interest in detecting the close button on the window
     Atom wm_delete = XInternAtom(fs->x_display, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(fs->x_display, new_frame, &wm_delete, 1);
+
+    // Convert the title string into a c-string and set title.
+    cstr title_c_string =
+        (cstr)arena_format(temp_arena(), STRINGP, STRINGV(frame->title));
+    arena_null_terminate(temp_arena());
+    XStoreName(fs->x_display, new_frame, title_c_string);
 
     // TODO: Will there be an issue of missing important events?
     bool mapped = false;
@@ -223,6 +230,8 @@ void fs_done(Frame* frame)
 
 bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
 {
+    temp_arena_reset();
+
     //
     // Collect any OS events and add them to our event queue
     //
