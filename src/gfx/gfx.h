@@ -45,6 +45,7 @@ typedef enum {
     FE_MOUSEMOVE,
     FE_MOUSEBUTTONDOWN,
     FE_MOUSEBUTTONUP,
+    FE_MOVE,
     FE_RESIZE,
     FE_CLOSE,
 } FrameEventKind;

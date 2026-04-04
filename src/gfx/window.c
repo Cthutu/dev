@@ -344,6 +344,8 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
             continue;
         }
 
+        event.frame_handle = info->handle;
+
         switch (xev.type) {
         case KeyPress:
             event.kind    = FE_KEYDOWN;
@@ -370,10 +372,39 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
             break;
 
         case ConfigureNotify:
-            event.kind   = FE_RESIZE;
-            event.width  = xev.xconfigure.width;
-            event.height = xev.xconfigure.height;
-            break;
+        {
+            bool moved =
+                info->x != xev.xconfigure.x || info->y != xev.xconfigure.y;
+            bool resized = info->width != (u64)xev.xconfigure.width ||
+                           info->height != (u64)xev.xconfigure.height;
+
+            info->x      = xev.xconfigure.x;
+            info->y      = xev.xconfigure.y;
+            info->width  = (u64)xev.xconfigure.width;
+            info->height = (u64)xev.xconfigure.height;
+
+            should_send_event = false;
+
+            if (moved) {
+                _fs_push_event(fs,
+                               (FrameEvent){
+                                   .kind         = FE_MOVE,
+                                   .frame_handle = info->handle,
+                                   .x            = info->x,
+                                   .y            = info->y,
+                               });
+            }
+
+            if (resized) {
+                _fs_push_event(fs,
+                               (FrameEvent){
+                                   .kind         = FE_RESIZE,
+                                   .frame_handle = info->handle,
+                                   .width        = info->width,
+                                   .height       = info->height,
+                               });
+            }
+        } break;
 
         case ClientMessage:
             should_send_event = false;
