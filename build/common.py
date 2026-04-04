@@ -7,6 +7,16 @@ import sys
 from pathlib import Path
 from textwrap import wrap
 from typing import Iterable
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 RED = "\033[31m"
 GREEN = "\033[32m"
@@ -15,6 +25,16 @@ YELLOW = "\033[33m"
 GREY = "\033[90m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
+RICH_CONSOLE = Console(stderr=False)
+
+
+class CommandFailure(RuntimeError):
+    def __init__(self, cmd: list[str], returncode: int, stdout: str, stderr: str) -> None:
+        super().__init__("command failed")
+        self.cmd = cmd
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def colour(text: str, prefix: str) -> str:
@@ -28,15 +48,27 @@ def prefix(label: str, color: str) -> str:
 def run_command(cmd: list[str]) -> None:
     sys.stdout.flush()
     sys.stderr.flush()
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        joined = " ".join(map(str, cmd))
-        bar = colour("=" * 48, RED)
-        print(bar, file=sys.stderr)
-        print(f"{prefix('fail', RED)} exit {result.returncode}", file=sys.stderr)
-        print(colour(joined, GREY), file=sys.stderr)
-        print(bar, file=sys.stderr)
-        raise SystemExit(result.returncode)
+        raise CommandFailure(
+            cmd,
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
+
+
+def print_command_failure(error: CommandFailure) -> None:
+    joined = " ".join(map(str, error.cmd))
+    bar = colour("=" * 48, RED)
+    if error.stdout:
+        print(error.stdout, end="", file=sys.stdout)
+    if error.stderr:
+        print(error.stderr, end="", file=sys.stderr)
+    print(bar, file=sys.stderr)
+    print(f"{prefix('fail', RED)} exit {error.returncode}", file=sys.stderr)
+    print(colour(joined, GREY), file=sys.stderr)
+    print(bar, file=sys.stderr)
 
 
 def select_cflags(profile: str) -> list[str]:
