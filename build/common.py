@@ -19,7 +19,7 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
-from rich.table import Table
+from rich.table import Column, Table
 
 RED = "\033[31m"
 GREEN = "\033[32m"
@@ -29,6 +29,7 @@ GREY = "\033[90m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 RICH_CONSOLE = Console(stderr=False)
+PROGRESS_LABEL_WIDTH = 28
 
 
 class CommandFailure(RuntimeError):
@@ -195,10 +196,21 @@ def banner(profile: str, items: list[str], noun: str, cc: str) -> None:
     print(colour(bar, CYAN))
 
 
+def fit_progress_label(text: str, width: int = PROGRESS_LABEL_WIDTH) -> str:
+    if width <= 1:
+        return text[:width]
+    if len(text) > width:
+        return "…" + text[-(width - 1) :]
+    return text.ljust(width)
+
+
 def create_progress(*, transient: bool = True) -> Progress:
     return Progress(
         SpinnerColumn(),
-        TextColumn("{task.description}"),
+        TextColumn(
+            "{task.description}",
+            table_column=Column(width=PROGRESS_LABEL_WIDTH, no_wrap=True),
+        ),
         BarColumn(bar_width=24),
         TaskProgressColumn(),
         TimeElapsedColumn(),
