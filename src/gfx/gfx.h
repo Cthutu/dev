@@ -22,6 +22,8 @@ typedef struct {
     u64          handle;
     FrameSystem* system;
     string       title;
+    i64          x;
+    i64          y;
     u64          width;
     u64          height;
 } Frame;
@@ -29,6 +31,11 @@ typedef struct {
 typedef struct {
     u64    handle;
     Window xid;
+    u8*    title_heap;
+    i64    x;
+    i64    y;
+    u64    width;
+    u64    height;
 } FrameInfo;
 
 typedef enum {

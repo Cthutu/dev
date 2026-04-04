@@ -99,8 +99,8 @@ internal u64 _fs_create_frame(const Frame* frame)
     Window new_frame = XCreateWindow(
         fs->x_display,     // Display
         fs->x_root_window, // Parent window
-        0,                 // X (don't care)
-        0,                 // Y (don't care)
+        frame->x,          // X position
+        frame->y,          // Y position
         frame->width,      // Inner width (in pixels)
         frame->height,     // Inner height (in pixels)
         0,                 // Border width
@@ -138,6 +138,19 @@ internal u64 _fs_create_frame(const Frame* frame)
     FrameInfo* info = _fs_new_frame_info(fs, handle);
     info->handle    = handle;
     info->xid       = new_frame;
+
+    XWindowAttributes attrs;
+    if (XGetWindowAttributes(fs->x_display, new_frame, &attrs)) {
+        info->x      = attrs.x;
+        info->y      = attrs.y;
+        info->width  = (u64)attrs.width;
+        info->height = (u64)attrs.height;
+    } else {
+        info->x      = frame->x;
+        info->y      = frame->y;
+        info->width  = frame->width;
+        info->height = frame->height;
+    }
 
     return handle;
 }
