@@ -21,6 +21,20 @@ internal FrameInfo* _fs_find_frame_info(FrameSystem* fs, u64 handle)
 }
 
 //------------------------------------------------------------------------------
+// _fs_find_frame_info_by_xid
+
+internal FrameInfo* _fs_find_frame_info_by_xid(FrameSystem* fs, Window xid)
+{
+    for (u64 i = 0; i < array_count(fs->frames); i++) {
+        FrameInfo* info = &fs->frames[i];
+        if (info->xid == xid) {
+            return info;
+        }
+    }
+    return NULL;
+}
+
+//------------------------------------------------------------------------------
 // _fs_new_frame_info
 
 internal FrameInfo* _fs_new_frame_info(FrameSystem* fs, u64 handle)
