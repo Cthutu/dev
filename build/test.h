@@ -45,8 +45,8 @@ typedef struct {
 
 // Test filtering options
 typedef struct {
-    const char* filter_category;
-    const char* filter_test;
+    const char* filter_scope;
+    const char* filter_name;
     int         help_requested;
 } TestOptions;
 
@@ -222,8 +222,8 @@ typedef struct {
 #define TEST_ASSERT_LE(a, b)                                                   \
     do {                                                                       \
         test_total_assertions++;                                               \
-        auto      _test_val_a = (a);                                           \
-        auto      _test_val_b = (b);                                           \
+        __auto_type _test_val_a = (a);                                         \
+        __auto_type _test_val_b = (b);                                         \
         /* Convert both to the wider type to avoid sign comparison */          \
         long long _cmp_a      = (long long)_test_val_a;                        \
         long long _cmp_b      = (long long)_test_val_b;                        \

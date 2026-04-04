@@ -21,10 +21,12 @@ run-release proj *args: (build-release proj)
 
 clean:
     rm -rf _bin _obj
+    rm -rf build/__pycache__
 
 alias b := build
 alias br := build-release
 alias t := test
+alias tr := test-release
 alias r := run
 alias rr := run-release
 alias c := clean

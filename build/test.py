@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 from common import (
     GREEN,
     GREY,
     RED,
-    available_top_level_c_files,
     banner,
     colour,
     compile_source,
@@ -24,14 +23,13 @@ from common import (
     select_cflags,
     source_defines_for_dir,
     unique,
-    write_if_changed,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = ROOT / "src"
 TESTS_DIR = ROOT / "tests"
 BUILD_DIR = ROOT / "build"
-BIN_DIR = ROOT / "_bin"
+BIN_DIR = ROOT / "_bin" / "tests"
 OBJ_DIR_BASE = ROOT / "_obj" / "tests"
 SCRIPT_PATH = Path(__file__).resolve()
 COMMON_PATH = BUILD_DIR / "common.py"
@@ -40,54 +38,70 @@ CC = os.environ.get("CC", "clang")
 LDFLAGS: list[str] = []
 
 
+class TestTarget(NamedTuple):
+    name: str
+    sources: list[Path]
+
+
 def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(description="Build and run unit tests.")
     parser.add_argument(
-        "tests",
+        "test_modules",
         nargs="*",
-        help="Test names or prefixes ending with '*' (omit to run all)",
+        help="Optional test module names (omit to run all modules)",
     )
     parser.add_argument(
         "-r", "--release", action="store_true", help="Build release profile"
     )
-    return parser.parse_known_args(argv[1:])
+    parser.add_argument(
+        "-t",
+        "--test",
+        dest="test_filter",
+        help="Run only a category or category:name within each selected module",
+    )
+    return parser.parse_args(argv[1:]), []
 
 
-def available_tests() -> list[str]:
-    return available_top_level_c_files(TESTS_DIR)
+def discover_test_targets() -> list[TestTarget]:
+    targets: list[TestTarget] = []
+
+    for path in sorted(TESTS_DIR.iterdir()):
+        if path.is_file() and path.suffix == ".c":
+            targets.append(TestTarget(path.stem, [path]))
+            continue
+
+        if path.is_dir():
+            sources = sorted(path.rglob("*.c"))
+            if sources:
+                targets.append(TestTarget(path.name, sources))
+
+    names = [target.name for target in targets]
+    if len(names) != len(set(names)):
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        duplicate_list = ", ".join(duplicates)
+        raise SystemExit(colour(f"Duplicate test target names: {duplicate_list}", RED))
+
+    return targets
 
 
-def select_tests(patterns: list[str]) -> list[str]:
-    tests = available_tests()
-    if not patterns:
+def select_tests(test_modules: list[str]) -> list[str]:
+    tests = [target.name for target in discover_test_targets()]
+    if not test_modules:
         return tests
 
     selected: list[str] = []
-    for pattern in patterns:
-        if pattern.endswith("*"):
-            prefix_text = pattern[:-1]
-            matches = [test for test in tests if test.startswith(prefix_text)]
-        else:
-            matches = [test for test in tests if test == pattern]
-
-        if not matches:
-            raise SystemExit(colour(f"No tests matched '{pattern}'", RED))
-
-        for match in matches:
-            if match not in selected:
-                selected.append(match)
-
+    for test_module in test_modules:
+        if test_module not in tests:
+            raise SystemExit(colour(f"Unknown test module '{test_module}'", RED))
+        if test_module not in selected:
+            selected.append(test_module)
     return selected
 
 
-def executable_path(profile: str) -> Path:
+def executable_path(test_name: str, profile: str) -> Path:
     suffix = "-debug" if profile == "debug" else ""
     extension = ".exe" if os.name == "nt" else ""
-    return BIN_DIR / f"tests{suffix}{extension}"
-
-
-def selection_stamp(profile: str) -> Path:
-    return OBJ_DIR_BASE / profile / ".selection"
+    return BIN_DIR / f"{test_name}{suffix}{extension}"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -99,28 +113,38 @@ def main(argv: list[str] | None = None) -> None:
     obj_dir = OBJ_DIR_BASE / profile
     include_flags = ["-Isrc", "-Ibuild"]
 
-    tests = select_tests(args.tests)
+    available_targets = {target.name: target for target in discover_test_targets()}
+    tests = select_tests(args.test_modules)
     if not tests:
         raise SystemExit(colour("No tests found in tests/", RED))
 
     banner(profile, tests, "tests", CC)
 
-    test_sources = [TESTS_DIR / f"{name}.c" for name in tests]
-    root_defines: dict[Path, list[str]] = {}
-    sections: list[str] = []
-    for src in test_sources:
-        source_sections, defines = parse_sections_and_defines(src, SRC_DIR)
-        root_defines[src] = defines
-        for section in source_sections:
-            if section not in sections:
-                sections.append(section)
-
-    section_list = expand_sections(sections, SRC_DIR)
-    dependency_sources = unique(
-        src for section in section_list for src in section_sources(section, SRC_DIR)
-    )
     support_source = BUILD_DIR / "test.c"
-    all_sources = unique([*test_sources, support_source, *dependency_sources])
+    root_defines: dict[Path, list[str]] = {}
+    sources_by_test: dict[str, list[Path]] = {}
+    all_sources: list[Path] = [support_source]
+
+    for test_name in tests:
+        target = available_targets[test_name]
+        target_sections: list[str] = []
+        for src in target.sources:
+            source_sections, defines = parse_sections_and_defines(src, SRC_DIR)
+            root_defines[src] = defines
+            for section in source_sections:
+                if section not in target_sections:
+                    target_sections.append(section)
+
+        dependency_sources = unique(
+            src
+            for section in expand_sections(target_sections, SRC_DIR)
+            for src in section_sources(section, SRC_DIR)
+        )
+        target_sources = unique([*target.sources, support_source, *dependency_sources])
+        sources_by_test[test_name] = target_sources
+        all_sources.extend(target_sources)
+
+    all_sources = unique(all_sources)
 
     extra_flags_by_source: dict[Path, list[str]] = {}
     header_deps_by_source: dict[Path, list[Path]] = {}
@@ -151,9 +175,6 @@ def main(argv: list[str] | None = None) -> None:
         relative_roots[src] = ROOT
         local_build_roots[src] = SRC_DIR
 
-    stamp = selection_stamp(profile)
-    write_if_changed(stamp, "\n".join(tests) + "\n")
-
     compiled: dict[Path, Path] = {}
     skipped_sources = 0
     for src in all_sources:
@@ -174,21 +195,26 @@ def main(argv: list[str] | None = None) -> None:
         if skipped:
             skipped_sources += 1
 
-    executable = executable_path(profile)
-    objects = [compiled[src] for src in all_sources]
-    link_executable(
-        cc=CC,
-        ldflags=LDFLAGS,
-        bin_dir=BIN_DIR,
-        root=ROOT,
-        objects=objects,
-        executable=executable,
-        extra_deps=[stamp],
-    )
+    executables: list[Path] = []
+    for test_name in tests:
+        executable = executable_path(test_name, profile)
+        objects = [compiled[src] for src in sources_by_test[test_name]]
+        link_executable(
+            cc=CC,
+            ldflags=LDFLAGS,
+            bin_dir=BIN_DIR,
+            root=ROOT,
+            objects=objects,
+            executable=executable,
+        )
+        executables.append(executable)
 
     print(f"{prefix('skip', GREY)} {skipped_sources} source file(s) up to date")
-    print(f"{prefix('run', GREEN)} {executable.relative_to(ROOT)}")
-    run_command([str(executable), *runner_args])
+    if args.test_filter:
+        runner_args = ["-t", args.test_filter]
+    for executable in executables:
+        print(f"{prefix('run', GREEN)} {executable.relative_to(ROOT)}")
+        run_command([str(executable), *runner_args])
 
 
 if __name__ == "__main__":

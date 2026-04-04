@@ -11,7 +11,8 @@
                 "nullptr"
             ],
             "includePath": [
-                "src"
+                "src",
+                "build"
             ]
         }
     ],

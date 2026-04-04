@@ -50,22 +50,25 @@ void test_register(void (*test_func)(void),
 
 void test_parse_args(int argc, char* argv[], TestOptions* options)
 {
-    options->filter_category = NULL;
-    options->filter_test     = NULL;
-    options->help_requested  = 0;
+    options->filter_scope   = NULL;
+    options->filter_name    = NULL;
+    options->help_requested = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             options->help_requested = 1;
-        } else if (strcmp(argv[i], "--category") == 0 ||
-                   strcmp(argv[i], "-c") == 0) {
-            if (i + 1 < argc) {
-                options->filter_category = argv[++i];
-            }
         } else if (strcmp(argv[i], "--test") == 0 ||
                    strcmp(argv[i], "-t") == 0) {
             if (i + 1 < argc) {
-                options->filter_test = argv[++i];
+                char* filter = argv[++i];
+                char* colon  = strchr(filter, ':');
+                if (colon) {
+                    *colon                = '\0';
+                    options->filter_scope = filter;
+                    options->filter_name  = colon + 1;
+                } else {
+                    options->filter_scope = filter;
+                }
             }
         }
     }
@@ -76,10 +79,8 @@ void test_print_help(const char* program_name)
     printf("Usage: %s [OPTIONS]\n\n", program_name);
     printf("Options:\n");
     printf("  -h, --help              Show this help message\n");
-    printf(
-        "  -c, --category <name>   Run only tests in the specified category\n");
-    printf("  -t, --test <name>       Run only the test with the specified "
-           "name\n");
+    printf("  -t, --test <filter>     Run only tests matching <category> or "
+           "<category>:<name>\n");
     printf("\n");
     printf("Environment Variables:\n");
     printf("  TEST_VERBOSE=1          Enable verbose output (show all "
@@ -87,8 +88,9 @@ void test_print_help(const char* program_name)
     printf("\n");
     printf("Examples:\n");
     printf("  %s                      Run all tests\n", program_name);
-    printf("  %s -c memory            Run only memory tests\n", program_name);
-    printf("  %s -t simple            Run only the 'simple' test\n",
+    printf("  %s -t memory            Run only memory category tests\n",
+           program_name);
+    printf("  %s -t memory:simple     Run only the memory::simple test\n",
            program_name);
     printf("  TEST_VERBOSE=1 %s       Run all tests with verbose output\n",
            program_name);
@@ -98,17 +100,16 @@ int test_should_run(const char*        category,
                     const char*        name,
                     const TestOptions* options)
 {
-    // If a specific test is requested, check if this is it
-    if (options->filter_test) {
-        return strcmp(name, options->filter_test) == 0;
+    if (options->filter_scope) {
+        if (strcmp(category, options->filter_scope) != 0) {
+            return 0;
+        }
     }
 
-    // If a category filter is set, check if this test matches
-    if (options->filter_category) {
-        return strcmp(category, options->filter_category) == 0;
+    if (options->filter_name) {
+        return strcmp(name, options->filter_name) == 0;
     }
 
-    // No filters, run all tests
     return 1;
 }
 
