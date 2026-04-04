@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 from common import (
+    BuildProgressTracker,
+    CommandFailure,
     GREEN,
     GREY,
     RED,
@@ -13,10 +15,14 @@ from common import (
     banner,
     colour,
     compile_source,
+    executable_needs_relink,
     expand_sections,
     headers_for_source,
     link_executable,
+    needs_rebuild,
+    obj_path,
     parse_sections_and_defines,
+    print_command_failure,
     prefix,
     section_sources,
     select_cflags,
@@ -112,34 +118,97 @@ def main(argv: list[str] | None = None) -> None:
 
     compiled: dict[Path, Path] = {}
     skipped_sources = 0
+    compile_work: dict[Path, bool] = {}
     for src in all_sources:
-        obj, skipped = compile_source(
-            cc=CC,
-            cflags=cflags,
-            include_flags=INCLUDE_FLAGS,
-            obj_dir=obj_dir,
-            src=src,
-            relative_to=SRC_DIR,
-            display_root=SRC_DIR,
-            extra_flags=extra_flags_by_source.get(src, []),
+        obj = obj_path(src, obj_dir, SRC_DIR)
+        compile_work[src] = needs_rebuild(
+            src,
+            obj,
             header_deps=header_deps_by_source.get(src, []),
             extra_deps=[SCRIPT_PATH, COMMON_PATH],
             local_build_root=SRC_DIR,
         )
         compiled[src] = obj
-        if skipped:
+        if not compile_work[src]:
             skipped_sources += 1
 
+    link_work: dict[str, bool] = {}
     for project, sources in project_sources.items():
         objects = [compiled[src] for src in sources]
-        link_executable(
-            cc=CC,
-            ldflags=LDFLAGS,
-            bin_dir=BIN_DIR,
-            root=ROOT,
-            objects=objects,
-            executable=executable_path(project, profile),
+        link_work[project] = executable_needs_relink(
+            executable_path(project, profile),
+            objects,
         )
+
+    module_phase_sources: dict[str, list[Path]] = {}
+    module_phase_order: list[str] = []
+    for project in projects:
+        root_src = SRC_DIR / f"{project}.c"
+        for src in project_sources[project]:
+            if src == root_src:
+                continue
+            module_name = src.relative_to(SRC_DIR).parts[0]
+            if module_name not in module_phase_sources:
+                module_phase_sources[module_name] = []
+                module_phase_order.append(module_name)
+            if src not in module_phase_sources[module_name]:
+                module_phase_sources[module_name].append(src)
+
+    phases: list[tuple[str, str, list[tuple[str, Path]], bool]] = []
+    for module_name in module_phase_order:
+        steps = [("compile", src) for src in module_phase_sources[module_name]]
+        had_work = any(compile_work.get(src, False) for src in module_phase_sources[module_name])
+        phases.append((module_name, "module", steps, had_work))
+
+    for project in projects:
+        root_src = SRC_DIR / f"{project}.c"
+        steps = [("compile", root_src), ("link", executable_path(project, profile))]
+        had_work = compile_work.get(root_src, False) or link_work.get(project, False)
+        phases.append((project, "project", steps, had_work))
+
+    with BuildProgressTracker(len(phases), noun="Build Phases") as tracker:
+        for phase_name, phase_kind, steps, had_work in phases:
+            tracker.start_target(phase_name, len(steps), kind=phase_kind)
+            for kind, path in steps:
+                if kind == "compile":
+                    tracker.step(
+                        f"[bold yellow]{phase_name}[/bold yellow] "
+                        f"[cyan]compile {path.relative_to(SRC_DIR)}[/cyan]"
+                    )
+                    if compile_work.get(path, False):
+                        obj, _ = compile_source(
+                            cc=CC,
+                            cflags=cflags,
+                            include_flags=INCLUDE_FLAGS,
+                            obj_dir=obj_dir,
+                            src=path,
+                            relative_to=SRC_DIR,
+                            display_root=SRC_DIR,
+                            extra_flags=extra_flags_by_source.get(path, []),
+                            header_deps=header_deps_by_source.get(path, []),
+                            extra_deps=[SCRIPT_PATH, COMMON_PATH],
+                            local_build_root=SRC_DIR,
+                            announce=False,
+                        )
+                        compiled[path] = obj
+                else:
+                    tracker.step(
+                        f"[bold yellow]{phase_name}[/bold yellow] "
+                        f"[cyan]link {path.relative_to(ROOT)}[/cyan]"
+                    )
+                    if link_work.get(phase_name, False):
+                        objects = [compiled[src] for src in project_sources[phase_name]]
+                        link_executable(
+                            cc=CC,
+                            ldflags=LDFLAGS,
+                            bin_dir=BIN_DIR,
+                            root=ROOT,
+                            objects=objects,
+                            executable=path,
+                            announce=False,
+                        )
+                tracker.advance_step()
+            tracker.finish_target(phase_name, had_work=had_work)
 
     print(f"{prefix('skip', GREY)} {skipped_sources} source file(s) up to date")
     finish_bar = colour("=" * 48, GREEN)
