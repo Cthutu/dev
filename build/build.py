@@ -185,10 +185,7 @@ def main(argv: list[str] | None = None) -> None:
             tracker.start_target(phase_name, len(steps), kind=phase_kind)
             for kind, path in steps:
                 if kind == "compile":
-                    tracker.step(
-                        f"[bold yellow]{phase_name}[/bold yellow] "
-                        f"[cyan]compile {path.relative_to(SRC_DIR)}[/cyan]"
-                    )
+                    tracker.step(path.name)
                     if compile_work.get(path, False):
                         obj, _ = compile_source(
                             cc=CC,
@@ -206,10 +203,7 @@ def main(argv: list[str] | None = None) -> None:
                         )
                         compiled[path] = obj
                 else:
-                    tracker.step(
-                        f"[bold yellow]{phase_name}[/bold yellow] "
-                        f"[cyan]link {path.relative_to(ROOT)}[/cyan]"
-                    )
+                    tracker.step(path.name)
                     if link_work.get(phase_name, False):
                         objects = [compiled[src] for src in project_sources[phase_name]]
                         link_executable(

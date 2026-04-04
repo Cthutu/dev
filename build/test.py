@@ -500,13 +500,7 @@ def main(argv: list[str] | None = None) -> None:
             tracker.start_target(test_name, len(steps))
             for kind, path in steps:
                 if kind == "compile":
-                    relative_base = (
-                        SRC_DIR if path.is_relative_to(SRC_DIR) else ROOT
-                    )
-                    tracker.step(
-                        f"[bold yellow]{test_name}[/bold yellow] "
-                        f"[cyan]compile {path.relative_to(relative_base)}[/cyan]"
-                    )
+                    tracker.step(path.name)
                     obj, _ = compile_source(
                         cc=CC,
                         cflags=cflags,
@@ -523,10 +517,7 @@ def main(argv: list[str] | None = None) -> None:
                     )
                     compiled[path] = obj
                 else:
-                    tracker.step(
-                        f"[bold yellow]{test_name}[/bold yellow] "
-                        f"[cyan]link {path.relative_to(ROOT)}[/cyan]"
-                    )
+                    tracker.step(path.name)
                     objects = [compiled[src] for src in sources_by_test[test_name]]
                     link_executable(
                         cc=CC,
