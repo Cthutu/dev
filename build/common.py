@@ -4,9 +4,11 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from textwrap import wrap
 from typing import Iterable
+from rich import box
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -17,6 +19,7 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.table import Table
 
 RED = "\033[31m"
 GREEN = "\033[32m"
@@ -35,6 +38,13 @@ class CommandFailure(RuntimeError):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+@dataclass
+class UndefinedSymbolReference:
+    symbol: str
+    source_location: str
+    referenced_from: str
 
 
 def colour(text: str, prefix: str) -> str:
@@ -61,6 +71,7 @@ def run_command(cmd: list[str]) -> None:
 def print_command_failure(error: CommandFailure) -> None:
     joined = " ".join(map(str, error.cmd))
     bar = colour("=" * 48, RED)
+    references = parse_undefined_symbol_references(error)
     if error.stdout:
         print(error.stdout, end="", file=sys.stdout)
     if error.stderr:
@@ -69,6 +80,94 @@ def print_command_failure(error: CommandFailure) -> None:
     print(f"{prefix('fail', RED)} exit {error.returncode}", file=sys.stderr)
     print(colour(joined, GREY), file=sys.stderr)
     print(bar, file=sys.stderr)
+    if references:
+        print()
+        print_undefined_symbol_table(references)
+
+
+def parse_undefined_symbol_references(
+    error: CommandFailure,
+) -> list[UndefinedSymbolReference]:
+    if "-c" in error.cmd:
+        return []
+
+    object_context_re = re.compile(
+        r"^/usr/bin/ld:\s+(?P<object>[^:]+): in function `(?P<context>[^']+)':$"
+    )
+    undefined_ref_re = re.compile(
+        r"^(?:/usr/bin/ld:\s+)?(?P<display>[^:]+):\((?P<section>[^+]+)\+(?P<offset>0x[0-9a-fA-F]+)\): "
+        r"undefined reference to `(?P<symbol>[^']+)'$"
+    )
+
+    references: list[UndefinedSymbolReference] = []
+    current_object: Path | None = None
+    current_context = "unknown"
+
+    for line in error.stderr.splitlines():
+        context_match = object_context_re.match(line)
+        if context_match:
+            current_object = Path(context_match.group("object"))
+            current_context = context_match.group("context")
+            continue
+
+        undefined_match = undefined_ref_re.match(line)
+        if not undefined_match:
+            continue
+
+        symbol = undefined_match.group("symbol")
+        display = undefined_match.group("display")
+        offset = undefined_match.group("offset")
+        source_location = resolve_reference_location(current_object, offset, display)
+        references.append(
+            UndefinedSymbolReference(
+                symbol=symbol,
+                source_location=source_location,
+                referenced_from=current_context,
+            )
+        )
+
+    return references
+
+
+def resolve_reference_location(
+    object_path: Path | None, offset: str, fallback_display: str
+) -> str:
+    if object_path is None or not object_path.exists():
+        return fallback_display
+
+    try:
+        result = subprocess.run(
+            ["addr2line", "-e", str(object_path), offset],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return fallback_display
+
+    resolved = result.stdout.strip()
+    if result.returncode != 0 or not resolved or resolved == "??:0":
+        return fallback_display
+    resolved = re.sub(r"^<indexed strings not yet supported>\s*", "", resolved)
+    return resolved
+
+
+def print_undefined_symbol_table(references: list[UndefinedSymbolReference]) -> None:
+    table = Table(
+        title="Undefined Symbols",
+        box=box.ROUNDED,
+        header_style="bold red",
+    )
+    table.add_column("Symbol", style="bold")
+    table.add_column("Referenced From")
+    table.add_column("Location")
+    for reference in references:
+        table.add_row(
+            reference.symbol,
+            reference.referenced_from,
+            reference.source_location,
+        )
+    RICH_CONSOLE.print(table)
 
 
 def select_cflags(profile: str) -> list[str]:
