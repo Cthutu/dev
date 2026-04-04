@@ -539,6 +539,9 @@ def executable_needs_relink(
     *,
     extra_deps: Iterable[Path] = (),
 ) -> bool:
+    if any(not obj.exists() for obj in objects):
+        return True
+
     if not executable.exists():
         return True
 
