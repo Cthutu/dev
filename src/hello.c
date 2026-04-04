@@ -7,30 +7,32 @@ int run(int argc, char** argv)
     UNUSED(argc);
     UNUSED(argv);
 
-    WindowSystem ws;
-    ws_init(&ws);
+    FrameSystem fs;
+    fs_init(&fs);
 
-    Window main_win = (Window){
-        .handle = WINDOW_HANDLE_NEW,
-        .system = &ws,
+    Frame main_frame = (Frame){
+        .handle = FRAME_HANDLE_NEW,
+        .system = &fs,
         .title  = string_from_cstr("Hello, World!"),
         .width  = 800,
         .height = 600,
     };
-    ws_apply(&main_win);
+    fs_apply(&main_frame);
 
-    WindowEvent event;
-    while (ws_loop(&ws, &event)) {
+    FrameEvent event;
+    while (fs_loop(&fs, &event)) {
         switch (event.kind) {
-        case WE_KEYDOWN:
+        case FE_KEYDOWN:
             if (event.keycode == KEY_ESCAPE) {
-                ws_done(&main_win);
+                fs_done(&main_frame);
             }
             break;
 
         default:
             break;
         }
+
+        fs_done(&main_frame);
     }
 
     return 0;

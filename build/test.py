@@ -34,9 +34,11 @@ from common import (
     banner,
     colour,
     compile_source,
+    config_deps_for_sections,
     executable_needs_relink,
     expand_sections,
     headers_for_source,
+    libs_for_sections,
     link_executable,
     needs_rebuild,
     parse_sections_and_defines,
@@ -380,18 +382,35 @@ def main(argv: list[str] | None = None) -> None:
 
     support_source = BUILD_DIR / "test.c"
     root_defines: dict[Path, list[str]] = {}
+    root_libs: dict[Path, list[str]] = {}
     sources_by_test: dict[str, list[Path]] = {}
+    libs_by_test: dict[str, list[str]] = {}
+    link_deps_by_test: dict[str, list[Path]] = {}
     all_sources: list[Path] = [support_source]
 
     for test_name in tests:
         target = available_targets[test_name]
         target_sections: list[str] = []
         for src in target.sources:
-            source_sections, defines = parse_sections_and_defines(src, SRC_DIR)
+            source_sections, defines, libs = parse_sections_and_defines(src, SRC_DIR)
             root_defines[src] = defines
+            root_libs[src] = libs
             for section in source_sections:
                 if section not in target_sections:
                     target_sections.append(section)
+
+        ordered_libs: list[str] = []
+        for lib in [*libs_for_sections(expand_sections(target_sections, SRC_DIR), SRC_DIR)]:
+            if lib not in ordered_libs:
+                ordered_libs.append(lib)
+        for src in target.sources:
+            for lib in root_libs[src]:
+                if lib not in ordered_libs:
+                    ordered_libs.append(lib)
+        libs_by_test[test_name] = ordered_libs
+        link_deps_by_test[test_name] = unique(
+            [*target.sources, *config_deps_for_sections(expand_sections(target_sections, SRC_DIR), SRC_DIR)]
+        )
 
         dependency_sources = unique(
             src
@@ -455,7 +474,13 @@ def main(argv: list[str] | None = None) -> None:
         executable = executable_path(test_name, profile)
         objects = [compiled[src] for src in sources_by_test[test_name]]
         executables.append((test_name, executable))
-        link_work[test_name] = executable_needs_relink(executable, objects)
+        link_work[test_name] = executable_needs_relink(
+            executable,
+            objects,
+            extra_deps=[SCRIPT_PATH, COMMON_PATH, *link_deps_by_test[test_name]],
+        )
+        if any(compile_work.get(src, False) for src in sources_by_test[test_name]):
+            link_work[test_name] = True
 
     target_steps: dict[str, list[tuple[str, Path]]] = {}
     seen_compile_steps: set[Path] = set()
@@ -505,11 +530,12 @@ def main(argv: list[str] | None = None) -> None:
                     objects = [compiled[src] for src in sources_by_test[test_name]]
                     link_executable(
                         cc=CC,
-                        ldflags=LDFLAGS,
+                        ldflags=[*LDFLAGS, *[f"-l{lib}" for lib in libs_by_test[test_name]]],
                         bin_dir=BIN_DIR,
                         root=ROOT,
                         objects=objects,
                         executable=path,
+                        extra_deps=[SCRIPT_PATH, COMMON_PATH, *link_deps_by_test[test_name]],
                         announce=False,
                     )
                 tracker.advance_step()

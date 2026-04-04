@@ -4,37 +4,43 @@
 // Copyright (C)2026 Matt Davies, all rights reserved
 //------------------------------------------------------------------------------
 //> use: core
+//> lib: X11
 
 #include <core/core.h>
 
+#include <X11/Xlib.h>
+
 //------------------------------------------------------------------------------
-// Windowing System
+// Frame System
 
-#define WINDOW_HANDLE_NEW 0
-#define WINDOW_HANDLE_CLOSED 1
+#define FRAME_HANDLE_NEW 0
+#define FRAME_HANDLE_CLOSED 1
 
-struct WindowSystem_t;
-
-typedef struct {
-    u64                    handle;
-    struct WindowSystem_t* system;
-    string                 title;
-    u64                    width;
-    u64                    height;
-} Window;
+typedef struct FrameSystem_t FrameSystem;
 
 typedef struct {
-    Window window;
-} WindowInfo;
+    u64          handle;
+    FrameSystem* system;
+    string       title;
+    u64          width;
+    u64          height;
+} Frame;
+
+typedef struct {
+    u64    handle;
+    Window xid;
+} FrameInfo;
 
 typedef enum {
-    WE_NONE,
-    WE_KEYDOWN,
-    WE_KEYUP,
-    WE_MOUSEMOVE,
-    WE_MOUSEBUTTONDOWN,
-    WE_MOUSEBUTTONUP,
-} WindowEventKind;
+    FE_NONE,
+    FE_KEYDOWN,
+    FE_KEYUP,
+    FE_MOUSEMOVE,
+    FE_MOUSEBUTTONDOWN,
+    FE_MOUSEBUTTONUP,
+    FE_RESIZE,
+    FE_CLOSE,
+} FrameEventKind;
 
 typedef enum {
     KEY_ESCAPE      = 9,
@@ -149,76 +155,79 @@ typedef enum {
     KEY_LSUPER      = 133,
     KEY_RSUPER      = 134,
     KEY_MENU        = 135,
-} KeyCode;
+} Keycode;
 
 typedef struct {
-    WindowEventKind kind;
-    u64             window_handle;
+    FrameEventKind kind;
+    u64            frame_handle;
     union {
         struct {
-            u64 keycode;
+            Keycode keycode;
         };
         struct {
             i64 x;
             i64 y;
         };
     };
-} WindowEvent;
+} FrameEvent;
 
-typedef struct WindowSystem_t {
-    Array(Window) windows;
-    Array(WindowEvent) events;
+struct FrameSystem_t {
+    Array(FrameInfo) frames;
+    Array(FrameEvent) events;
     u64 next_handle;
-} WindowSystem;
 
-// Initialise the window system.
-//
-// When `ws_loop` returns false, it will have cleaned up the resources for
-// WindowSyStem, so no explicit clean up required.
-//
-void ws_init(WindowSystem* ws);
+    Display* x_display;
+    Window   x_root_window;
+};
 
-// Apply the current state of a Window struct.
+// Initialise the frame system.
 //
-// This applies any changes in the Window struct resulting in changing of window
+// When `fs_loop` returns false, it will have cleaned up the resources for
+// FrameSystem, so no explicit clean up required.
+//
+void fs_init(FrameSystem* fs);
+
+// Apply the current state of a Frame struct.
+//
+// This applies any changes in the Frame struct resulting in changing of frame
 // state or creating it in the first place.  The `handle` field must be 0 (or
-// WINDOW_HANDLE_NEW) to first create a window.  When the window is first
-// created, the `handle` field is written to so the Window struct can be reused
-// for mutation with this function.  Additionally, the WindowSystem reference
+// FRAME_HANDLE_NEW) to first create a frame.  When the frame is first
+// created, the `handle` field is written to so the Frame struct can be reused
+// for mutation with this function.  Additionally, the FrameSystem reference
 // will be written to it too.
 //
-void ws_apply(Window* win);
+void fs_apply(Frame* frame);
 
-// Manually close the window down.
+// Manually close the frame down.
 //
-// You must pass a Window with a valid handle and WindowSystem reference.  After
-// closing, the Window struct's handle is set to a particular value
-// (WINDOW_HANDLE_CLOSED) that marks it as closed.  To bring this window back,
-// just set the handle to WINDOW_HANDLE_NEW and apply again.
+// You must pass a Frame with a valid handle and FrameSystem reference.  After
+// closing, the Frame struct's handle is set to a particular value
+// (FRAME_HANDLE_CLOSED) that marks it as closed.  To bring this frame back,
+// just set the handle to FRAME_HANDLE_NEW and apply again.
 //
-void ws_done(Window* win);
+void fs_done(Frame* frame);
 
-// Get the latest state of a window.
+// Get the latest state of a frame.
 //
-// Ensure that the `system` field is set to the correct WindowSystem and that
-// the `handle` field is set too.  This identifies the window and this function
+// Ensure that the `system` field is set to the correct FrameSystem and that
+// the `handle` field is set too.  This identifies the frame and this function
 // fills in all the information about it.
 //
-// Before handling events that can change the window state, you should call this
-// function to get the latest update as window state can be changed by the user
+// Before handling events that can change the frame state, you should call this
+// function to get the latest update as frame state can be changed by the user
 // directly through the desktop.
 //
-void ws_update(Window* win);
+void fs_update(Frame* frame);
 
-// Loop the window system and fetch the next event.
+// Loop the frame system and fetch the next event.
 //
-// If there are no events, WE_NONE is returned.
+// If there are no events, FE_NONE is returned.
 //
 // This function will return true if you need to keep looping, therefore this
 // should be called within a `while` loop.  When the function returns false, it
-// means that all windows have been closed, all events have been processed and
+// means that all frames have been closed, all events have been processed and
 // all resources have been reclaimed.  There is no further work to do with the
-// window system.  The WindowSystem instance itself will be cleaned up and
+// frame system.  The FrameSystem instance itself will be cleaned up and
 // cannot be used again.
 //
-bool ws_loop(WindowSystem* ws, WindowEvent* event);
+bool fs_loop(FrameSystem* fs, FrameEvent* event);

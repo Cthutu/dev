@@ -10,10 +10,12 @@ Add directives as line comments:
 ```c
 //> use: greet core
 //> def: FEATURE_X GREETING=42
+//> lib: X11
 ```
 
 - `use`: list module names (directories under `src/`)
 - `def`: list preprocessor symbols (optionally `NAME=VALUE`)
+- `lib`: list linker libraries (emits `-l<name>` during the link step)
 
 Unknown directives are errors.
 
@@ -24,6 +26,7 @@ Each module directory may include a `.build` file with directive lines:
 ```
 use: util net
 def: LOGGING LOG_LEVEL=2
+lib: X11
 ```
 
 Blank lines are ignored. Non-empty lines must match `command: params`.

@@ -247,15 +247,15 @@ usize mem_get_allocation_count(void);
 usize mem_get_total_allocated(void);
 #endif // CONFIG_DEBUG
 
-#define KORE_ALLOC(size) mem_alloc((size), __FILE__, __LINE__)
-#define KORE_REALLOC(ptr, size) mem_realloc((ptr), (size), __FILE__, __LINE__)
-#define KORE_FREE(ptr) ptr = mem_free((ptr), __FILE__, __LINE__), (ptr) = NULL
+#define ALLOC(size) mem_alloc((size), __FILE__, __LINE__)
+#define REALLOC(ptr, size) mem_realloc((ptr), (size), __FILE__, __LINE__)
+#define FREE(ptr) ptr = mem_free((ptr), __FILE__, __LINE__), (ptr) = NULL
 
-#define KORE_ARRAY_ALLOC(type, count)                                          \
+#define ARRAY_ALLOC(type, count)                                               \
     (type*)mem_alloc(sizeof(type) * (count), __FILE__, __LINE__)
-#define KORE_ARRAY_REALLOC(ptr, type, count)                                   \
+#define ARRAY_REALLOC(ptr, type, count)                                        \
     (type*)mem_realloc((ptr), sizeof(type) * (count), __FILE__, __LINE__)
-#define KORE_ARRAY_FREE(ptr) KORE_FREE(ptr)
+#define ARRAY_FREE(ptr) FREE(ptr)
 
 void mem_break_on_alloc(u64 index);
 
@@ -307,7 +307,7 @@ void* array_maybe_grow(void* array,
     do {                                                                       \
         if ((a)) {                                                             \
             ArrayHeader* header = __array_info(a);                             \
-            KORE_FREE(header);                                                 \
+            FREE(header);                                                      \
             (a) = NULL;                                                        \
         }                                                                      \
     } while (0)
@@ -319,6 +319,15 @@ void* array_maybe_grow(void* array,
             memmove(&(a)[__array_index],                                       \
                     &(a)[__array_index + 1],                                   \
                     (array_count(a) - __array_index - 1) * sizeof(*(a)));      \
+            __array_count(a)--;                                                \
+        }                                                                      \
+    } while (0)
+
+#define array_delete_quick(a, index)                                           \
+    do {                                                                       \
+        usize __array_index = (index);                                         \
+        if (__array_index < array_count(a)) {                                  \
+            (a)[__array_index] = (a)[array_count(a) - 1];                      \
             __array_count(a)--;                                                \
         }                                                                      \
     } while (0)
@@ -411,7 +420,7 @@ void arena_null_terminate(Arena* arena);
 
 u64  arena_store(Arena* arena);
 void arena_restore(Arena* arena, u64 mark);
-void  arena_reset(Arena* arena);
+void arena_reset(Arena* arena);
 
 //
 // Arena state

@@ -337,9 +337,10 @@ def _parse_command_lines(
     *,
     require_prefix: bool,
     section_root: Path,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     sections: list[str] = []
     defines: list[str] = []
+    libs: list[str] = []
     for line_no, line in enumerate(lines, start=1):
         if require_prefix:
             match = re.match(r"\s*//>\s*(\w+)\s*:\s*(.*)$", line)
@@ -385,6 +386,16 @@ def _parse_command_lines(
                         )
                     )
                 _add_unique(defines, token)
+        elif command == "lib":
+            for token in tokens:
+                if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*", token):
+                    raise SystemExit(
+                        colour(
+                            f"Invalid library name in {source}:{line_no}: '{token}'",
+                            RED,
+                        )
+                    )
+                _add_unique(libs, token)
         else:
             border_top = colour("┌──────┬───────────────────────┐", CYAN)
             border_mid = colour("├──────┼───────────────────────┤", CYAN)
@@ -410,6 +421,13 @@ def _parse_command_lines(
                 + colour("preprocessor defines", CYAN)
                 + colour("  │", CYAN)
             )
+            row_lib = (
+                colour("│ ", CYAN)
+                + colour("lib ", GREEN)
+                + colour(" │ ", CYAN)
+                + colour("linker libraries", CYAN)
+                + colour("      │", CYAN)
+            )
             table_lines = [
                 colour("Known commands:", YELLOW),
                 border_top,
@@ -417,6 +435,7 @@ def _parse_command_lines(
                 border_mid,
                 row_use,
                 row_def,
+                row_lib,
                 border_bot,
             ]
             raise SystemExit(
@@ -424,12 +443,12 @@ def _parse_command_lines(
                 + "\n"
                 + "\n".join(table_lines)
             )
-    return sections, defines
+    return sections, defines, libs
 
 
 def parse_sections_and_defines(
     src: Path, section_root: Path
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     text = src.read_text(encoding="utf-8", errors="ignore")
     return _parse_command_lines(
         text.splitlines(),
@@ -465,7 +484,9 @@ def module_header_for_dir(directory: Path, section_root: Path) -> Path | None:
     )
 
 
-def parse_build_file(build_file: Path, section_root: Path) -> tuple[list[str], list[str]]:
+def parse_build_file(
+    build_file: Path, section_root: Path
+) -> tuple[list[str], list[str], list[str]]:
     text = build_file.read_text(encoding="utf-8", errors="ignore")
     return _parse_command_lines(
         text.splitlines(),
@@ -477,22 +498,26 @@ def parse_build_file(build_file: Path, section_root: Path) -> tuple[list[str], l
 
 def module_config_for_dir(
     directory: Path, section_root: Path
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     sections: list[str] = []
     defines: list[str] = []
+    libs: list[str] = []
     header = module_header_for_dir(directory, section_root)
     if header:
-        h_sections, h_defines = parse_sections_and_defines(header, section_root)
+        h_sections, h_defines, h_libs = parse_sections_and_defines(header, section_root)
         sections.extend(h_sections)
         defines.extend(h_defines)
+        libs.extend(h_libs)
     build_file = directory / ".build"
     if build_file.exists():
-        b_sections, b_defines = parse_build_file(build_file, section_root)
+        b_sections, b_defines, b_libs = parse_build_file(build_file, section_root)
         for section in b_sections:
             _add_unique(sections, section)
         for define in b_defines:
             _add_unique(defines, define)
-    return sections, defines
+        for lib in b_libs:
+            _add_unique(libs, lib)
+    return sections, defines, libs
 
 
 def expand_sections(sections: list[str], section_root: Path) -> list[str]:
@@ -501,7 +526,7 @@ def expand_sections(sections: list[str], section_root: Path) -> list[str]:
     pending = list(sections)
     while pending:
         section = pending.pop(0)
-        deps, _ = module_config_for_dir(section_root / section, section_root)
+        deps, _, _ = module_config_for_dir(section_root / section, section_root)
         for dep in deps:
             if dep not in seen:
                 seen.add(dep)
@@ -524,7 +549,7 @@ def dependency_sections_for_source(
 ) -> list[str]:
     sections: list[str] = []
     if src.suffix == ".c" and src.exists():
-        source_sections, _ = parse_sections_and_defines(src, section_root)
+        source_sections, _, _ = parse_sections_and_defines(src, section_root)
         for section in source_sections:
             _add_unique(sections, section)
 
@@ -534,7 +559,7 @@ def dependency_sections_for_source(
         and module_dir.is_relative_to(section_root)
         and module_dir != section_root
     ):
-        module_sections, _ = module_config_for_dir(module_dir, section_root)
+        module_sections, _, _ = module_config_for_dir(module_dir, section_root)
         for section in module_sections:
             _add_unique(sections, section)
 
@@ -558,8 +583,35 @@ def headers_for_source(src: Path, source_root: Path, section_root: Path) -> list
 def source_defines_for_dir(directory: Path, section_root: Path) -> list[str]:
     if directory == section_root or not directory.is_relative_to(section_root):
         return []
-    _, defines = module_config_for_dir(directory, section_root)
+    _, defines, _ = module_config_for_dir(directory, section_root)
     return defines
+
+
+def libs_for_sections(sections: Iterable[str], section_root: Path) -> list[str]:
+    libs: list[str] = []
+    for section in sections:
+        _, _, section_libs = module_config_for_dir(section_root / section, section_root)
+        for lib in section_libs:
+            _add_unique(libs, lib)
+    return libs
+
+
+def config_deps_for_sections(sections: Iterable[str], section_root: Path) -> list[Path]:
+    deps: list[Path] = []
+    root_build = section_root / ".build"
+    if root_build.exists():
+        deps.append(root_build)
+
+    for section in sections:
+        directory = section_root / section
+        header = module_header_for_dir(directory, section_root)
+        if header and header not in deps:
+            deps.append(header)
+        build_file = directory / ".build"
+        if build_file.exists() and build_file not in deps:
+            deps.append(build_file)
+
+    return deps
 
 
 def obj_path(src: Path, obj_dir: Path, relative_to: Path) -> Path:

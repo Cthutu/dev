@@ -15,9 +15,11 @@ from common import (
     banner,
     colour,
     compile_source,
+    config_deps_for_sections,
     executable_needs_relink,
     expand_sections,
     headers_for_source,
+    libs_for_sections,
     link_executable,
     needs_rebuild,
     obj_path,
@@ -55,19 +57,24 @@ def available_projects() -> list[str]:
     return available_top_level_c_files(SRC_DIR)
 
 
-def sources_for_project(project: str) -> tuple[list[Path], list[str]]:
+def sources_for_project(project: str) -> tuple[list[Path], list[str], list[str], list[Path]]:
     root_src = SRC_DIR / f"{project}.c"
     if not root_src.exists():
         raise SystemExit(
             colour(f"Unknown project '{project}' (missing {root_src})", RED)
         )
 
-    sections, defines = parse_sections_and_defines(root_src, SRC_DIR)
+    sections, defines, libs = parse_sections_and_defines(root_src, SRC_DIR)
     sections = expand_sections(sections, SRC_DIR)
     sources: list[Path] = [root_src]
     for section in sections:
         sources.extend(section_sources(section, SRC_DIR))
-    return unique(sources), defines
+    ordered_libs: list[str] = []
+    for lib in [*libs_for_sections(sections, SRC_DIR), *libs]:
+        if lib not in ordered_libs:
+            ordered_libs.append(lib)
+    link_deps = [root_src, *config_deps_for_sections(sections, SRC_DIR)]
+    return unique(sources), defines, ordered_libs, unique(link_deps)
 
 
 def executable_path(project: str, profile: str) -> Path:
@@ -90,10 +97,14 @@ def main(argv: list[str] | None = None) -> None:
 
     project_sources: dict[str, list[Path]] = {}
     project_defines: dict[str, list[str]] = {}
+    project_libs: dict[str, list[str]] = {}
+    project_link_deps: dict[str, list[Path]] = {}
     for name in projects:
-        sources, defines = sources_for_project(name)
+        sources, defines, libs, link_deps = sources_for_project(name)
         project_sources[name] = sources
         project_defines[name] = defines
+        project_libs[name] = libs
+        project_link_deps[name] = link_deps
 
     all_sources = unique(src for sources in project_sources.values() for src in sources)
     banner(profile, projects, "projects", CC)
@@ -138,7 +149,10 @@ def main(argv: list[str] | None = None) -> None:
         link_work[project] = executable_needs_relink(
             executable_path(project, profile),
             objects,
+            extra_deps=[SCRIPT_PATH, COMMON_PATH, *project_link_deps[project]],
         )
+        if any(compile_work.get(src, False) for src in sources):
+            link_work[project] = True
 
     module_phase_sources: dict[str, list[Path]] = {}
     module_phase_order: list[str] = []
@@ -200,11 +214,12 @@ def main(argv: list[str] | None = None) -> None:
                         objects = [compiled[src] for src in project_sources[phase_name]]
                         link_executable(
                             cc=CC,
-                            ldflags=LDFLAGS,
+                            ldflags=[*LDFLAGS, *[f"-l{lib}" for lib in project_libs[phase_name]]],
                             bin_dir=BIN_DIR,
                             root=ROOT,
                             objects=objects,
                             executable=path,
+                            extra_deps=[SCRIPT_PATH, COMMON_PATH, *project_link_deps[phase_name]],
                             announce=False,
                         )
                 tracker.advance_step()
