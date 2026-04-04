@@ -50,3 +50,33 @@ void kill(cstr format, ...)
     epr("\n");
     abort();
 }
+
+void temp_arena_init()
+{
+    if (!g_temp_arena_in_use) {
+        arena_init(&g_temp_arena, .reserved_size = 4096, .grow_rate = 1);
+    }
+    ++g_temp_arena_in_use;
+}
+
+void temp_arena_done()
+{
+    ASSERT(g_temp_arena_in_use > 0, "Temporary arena is not in use");
+
+    --g_temp_arena_in_use;
+    if (!g_temp_arena_in_use) {
+        arena_done(&g_temp_arena);
+    }
+}
+
+Arena* temp_arena()
+{
+    ASSERT(g_temp_arena_in_use, "Temporary arena is not in use");
+    return &g_temp_arena;
+}
+
+void temp_arena_reset()
+{
+    ASSERT(g_temp_arena_in_use, "Temporary arena is not in use");
+    arena_reset(&g_temp_arena);
+}
