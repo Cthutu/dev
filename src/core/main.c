@@ -18,24 +18,26 @@ int run(int argc, char** argv);
 int main(int argc, char** argv)
 {
     mutex_init(&g_kore_output_mutex);
+    temp_arena_init();
 
-#if OS_WINDOWS
+#    if OS_WINDOWS
     UINT old_cp = GetConsoleCP();
     SetConsoleCP(CP_UTF8);
     UINT old_output_cp = GetConsoleOutputCP();
     SetConsoleOutputCP(CP_UTF8);
-#endif // OS_WINDOWS
+#    endif // OS_WINDOWS
 
     int result = run(argc, argv);
 
-#if OS_WINDOWS
+#    if OS_WINDOWS
     SetConsoleCP(old_cp);
     SetConsoleOutputCP(old_output_cp);
-#endif // OS_WINDOWS
+#    endif // OS_WINDOWS
 
-#if CONFIG_DEBUG
+#    if CONFIG_DEBUG
     mem_print_leaks();
-#endif // CONFIG_DEBUG
+#    endif // CONFIG_DEBUG
+    temp_arena_done();
     mutex_done(&g_kore_output_mutex);
     return result;
 }
