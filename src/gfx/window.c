@@ -51,6 +51,7 @@ internal void _fs_delete_frame_info(FrameSystem* fs, u64 handle)
 {
     for (u64 i = 0; i < array_count(fs->frames); i++) {
         if (fs->frames[i].handle == handle) {
+            ARRAY_FREE(fs->frames[i].title_heap);
             array_delete_quick(fs->frames, i);
             return;
         }
@@ -256,19 +257,45 @@ void fs_done(Frame* frame)
 //------------------------------------------------------------------------------
 // fs_update
 
-// TODO: Implement this to update the Frame structure to match the actual
-// current state of the frame.
-//
-// There are two ways we can do this and you should decide which way is better.
-// You can either 1) track any events related to the state in Frame and store
-// that information in the associated FrameInfo; or 2) call any querying API to
-// get the state directly at his time.
-//
-// The first relies on accurate tracking of all necessary events (like resizing,
-// title change etc), and the second one might be slower since we querying all
-// the time.  If the query functions in X11 are fast, this might be fine and
-// preferable to the first solution, which requires sync code to maintained.
-void fs_update(Frame* frame) { UNUSED(frame); }
+void fs_update(Frame* frame)
+{
+    FrameInfo* info = _fs_find_frame_info(frame->system, frame->handle);
+    if (!info) {
+        return;
+    }
+
+    XWindowAttributes attrs;
+    if (XGetWindowAttributes(frame->system->x_display, info->xid, &attrs)) {
+        frame->x      = attrs.x;
+        frame->y      = attrs.y;
+        frame->width  = (u64)attrs.width;
+        frame->height = (u64)attrs.height;
+        info->x       = frame->x;
+        info->y       = frame->y;
+        info->width   = frame->width;
+        info->height  = frame->height;
+    }
+
+    char* title = NULL;
+    if (XFetchName(frame->system->x_display, info->xid, &title) > 0 && title) {
+        usize title_len = 0;
+        while (title[title_len] != '\0') {
+            title_len++;
+        }
+
+        usize required_size = title_len + 1;
+        if (!info->title_heap) {
+            info->title_heap = ARRAY_ALLOC(u8, required_size);
+        } else if (mem_size(info->title_heap) < required_size) {
+            info->title_heap = ARRAY_REALLOC(info->title_heap, u8, required_size);
+        }
+
+        memcpy(info->title_heap, title, title_len);
+        info->title_heap[title_len] = '\0';
+        frame->title = string_from(info->title_heap, title_len);
+        XFree(title);
+    }
+}
 
 //------------------------------------------------------------------------------
 // fs_loop
