@@ -87,30 +87,44 @@ internal bool _fs_pop_event(FrameSystem* fs, FrameEvent* event)
 
 internal u64 _fs_create_frame(const Frame* frame)
 {
-    FrameSystem* fs  = frame->system;
+    FrameSystem* fs          = frame->system;
 
-    Window new_frame = XCreateSimpleWindow(
-        fs->x_display,
-        fs->x_root_window,
-        0,
-        0,
-        frame->width,
-        frame->height,
-        0,
-        BlackPixel(fs->x_display, DefaultScreen(fs->x_display)),
-        WhitePixel(fs->x_display, DefaultScreen(fs->x_display)));
-    XSelectInput(fs->x_display,
-                 new_frame,
-                 KeyPressMask | KeyReleaseMask | PointerMotionMask |
-                     ButtonPressMask | ButtonReleaseMask | StructureNotifyMask);
+    XSetWindowAttributes swa = {
+        .event_mask = KeyPressMask | KeyReleaseMask | PointerMotionMask |
+                      ButtonPressMask | ButtonReleaseMask | StructureNotifyMask,
+        .background_pixel =
+            BlackPixel(fs->x_display, DefaultScreen(fs->x_display)),
+    };
+
+    Window new_frame = XCreateWindow(
+        fs->x_display,     // Display
+        fs->x_root_window, // Parent window
+        0,                 // X (don't care)
+        0,                 // Y (don't care)
+        frame->width,      // Inner width (in pixels)
+        frame->height,     // Inner height (in pixels)
+        0,                 // Border width
+        CopyFromParent,    // Depth (same as parent)
+        InputOutput,       // Class of window (interact with input and output)
+        CopyFromParent,    // Visual (same as parent)
+        CWEventMask | CWBackPixel, // What fields to take from swa
+        &swa                       // Attributes structure
+    );
+
     XMapWindow(fs->x_display, new_frame);
-    u64 handle = fs->next_handle++;
+    u64 handle     = fs->next_handle++;
 
-    for (;;) {
+    Atom wm_delete = XInternAtom(fs->x_display, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(fs->x_display, new_frame, &wm_delete, 1);
+
+    // TODO: Will there be an issue of missing important events?
+    bool mapped = false;
+    while (!mapped) {
         XEvent event;
-        XNextEvent(fs->x_display, &event);
-        if (event.type == MapNotify && event.xmap.window == new_frame) {
-            break;
+        XWindowEvent(fs->x_display, new_frame, StructureNotifyMask, &event);
+
+        if (event.type == MapNotify) {
+            mapped = true;
         }
     }
 
