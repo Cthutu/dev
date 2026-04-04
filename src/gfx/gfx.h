@@ -168,6 +168,10 @@ typedef struct {
             i64 x;
             i64 y;
         };
+        struct {
+            u64 width;
+            u64 height;
+        };
     };
 } FrameEvent;
 
