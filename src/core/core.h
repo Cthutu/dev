@@ -442,6 +442,18 @@ void* arena_session_alloc(ArenaSession* session, usize count);
 usize arena_session_count(ArenaSession* session);
 void* arena_session_address(ArenaSession* session);
 
+//
+// Temp arena management
+//
+// Only usable if core's main function is used or you manually call the init and
+// done functions.
+//
+
+void   temp_arena_init();
+void   temp_arena_done();
+Arena* temp_arena();
+void   temp_arena_reset();
+
 //------------------------------------------------------------------------------[Mutex]
 
 #if OS_WINDOWS

@@ -7,6 +7,8 @@
 #include <core/core.h>
 
 extern Mutex g_kore_output_mutex;
+Arena        g_temp_arena;
+u64          g_temp_arena_in_use = 0;
 
 //------------------------------------------------------------------------------
 
