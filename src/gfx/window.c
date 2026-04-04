@@ -208,31 +208,109 @@ void fs_apply(Frame* frame)
 void fs_done(Frame* frame)
 {
     _fs_close_frame(frame);
+    FrameEvent close_event = {
+        .kind         = FE_CLOSE,
+        .frame_handle = frame->handle,
+    };
+    _fs_push_event(frame->system, close_event);
     frame->handle = FRAME_HANDLE_CLOSED;
 }
 
 //------------------------------------------------------------------------------
 // fs_loop
 
-bool fs_loop(FrameSystem* fs, FrameEvent* event)
+bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
 {
-    // Platform-specific event polling code goes here.
-    // This should fill in the `event` struct with the latest event
-    // information and return true if the loop should continue running, or
-    // false if it should exit.
+    //
+    // Collect any OS events and add them to our event queue
+    //
 
-    UNUSED(fs);
+    FrameEvent event;
+    event.kind = FE_NONE;
 
-    event->kind = FE_NONE;
+    XEvent xev;
+    while (XPending(fs->x_display) > 0) {
+        bool should_send_event = true;
+        XNextEvent(fs->x_display, &xev);
+        FrameInfo* info = _fs_find_frame_info_by_xid(fs, xev.xany.window);
+        if (!info) {
+            continue;
+        }
 
-    time_sleep_ms(2000);
+        switch (xev.type) {
+        case KeyPress:
+            event.kind    = FE_KEYDOWN;
+            event.keycode = xev.xkey.keycode;
+            break;
 
-    if (array_count(fs->frames) == 0) {
+        case KeyRelease:
+            event.kind    = FE_KEYUP;
+            event.keycode = xev.xkey.keycode;
+            break;
+
+        case MotionNotify:
+            event.kind = FE_MOUSEMOVE;
+            event.x    = xev.xmotion.x;
+            event.y    = xev.xmotion.y;
+            break;
+
+        case ButtonPress:
+            event.kind = FE_MOUSEBUTTONDOWN;
+            break;
+
+        case ButtonRelease:
+            event.kind = FE_MOUSEBUTTONUP;
+            break;
+
+        case ConfigureNotify:
+            event.kind   = FE_RESIZE;
+            event.width  = xev.xconfigure.width;
+            event.height = xev.xconfigure.height;
+            break;
+
+        case ClientMessage:
+            should_send_event = false;
+            fs_done(&(Frame){
+                .handle = info->handle,
+                .system = fs,
+            });
+            break;
+
+        default:
+            should_send_event = false;
+            break;
+        }
+
+        if (should_send_event) {
+            array_push(fs->events, event);
+        }
+    }
+
+    //
+    // If there are no more frames or events, we need to signal an exit from the
+    // main loop
+    //
+
+    if ((array_count(fs->frames) == 0) && (array_count(fs->events) == 0)) {
         array_free(fs->frames);
         array_free(fs->events);
         XCloseDisplay(fs->x_display);
         return false;
     }
+
+    //
+    // Grab one event, if any, off our queue
+    //
+
+    if (array_count(fs->events) > 0) {
+        *out_event = array_pop(fs->events);
+    } else {
+        out_event->kind = FE_NONE;
+    }
+
+    //
+    // Otherwise, keep looping
+    //
 
     return true;
 }
