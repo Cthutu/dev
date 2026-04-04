@@ -231,11 +231,11 @@ class BuildProgressTracker:
     def __enter__(self) -> "BuildProgressTracker":
         self.progress.__enter__()
         self.overall_task_id = self.progress.add_task(
-            f"[bold green]{self.noun}[/bold green] [grey70](0/{self.total_targets})[/grey70]",
+            fit_progress_label(f"{self.noun} (0/{self.total_targets})"),
             total=self.total_targets,
         )
         self.current_task_id = self.progress.add_task(
-            "[bold yellow]Preparing[/bold yellow]",
+            fit_progress_label("Preparing"),
             total=1,
         )
         return self
@@ -250,22 +250,23 @@ class BuildProgressTracker:
         label = f"{name} {kind}" if kind else name
         self.progress.update(
             self.overall_task_id,
-            description=(
-                f"[bold green]{self.noun}[/bold green] "
-                f"[grey70]({completed}/{self.total_targets})[/grey70] "
-                f"[cyan]{label}[/cyan]"
+            description=fit_progress_label(
+                f"{self.noun} ({completed}/{self.total_targets}) {label}"
             ),
         )
         self.progress.update(
             self.current_task_id,
             total=max(total_steps, 1),
             completed=0,
-            description=f"[bold yellow]{label}[/bold yellow]",
+            description=fit_progress_label(label),
         )
 
     def step(self, description: str) -> None:
         assert self.current_task_id is not None
-        self.progress.update(self.current_task_id, description=description)
+        self.progress.update(
+            self.current_task_id,
+            description=fit_progress_label(description),
+        )
 
     def advance_step(self) -> None:
         assert self.current_task_id is not None
@@ -280,16 +281,13 @@ class BuildProgressTracker:
             self.current_task_id,
             total=1,
             completed=1,
-            description=f"[bold {colour_name}]{name} {status}[/bold {colour_name}]",
+            description=fit_progress_label(f"{name} {status}"),
         )
         self.progress.advance(self.overall_task_id, 1)
         completed = int(self.progress.tasks[self.overall_task_id].completed)
         self.progress.update(
             self.overall_task_id,
-            description=(
-                f"[bold green]{self.noun}[/bold green] "
-                f"[grey70]({completed}/{self.total_targets})[/grey70]"
-            ),
+            description=fit_progress_label(f"{self.noun} ({completed}/{self.total_targets})"),
         )
 
 
