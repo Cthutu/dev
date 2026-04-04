@@ -23,16 +23,22 @@ int run(int argc, char** argv)
     while (fs_loop(&fs, &event)) {
         switch (event.kind) {
         case FE_KEYDOWN:
-            if (event.keycode == KEY_ESCAPE) {
+            if (event.keycode == KEY_ESCAPE || event.keycode == KEY_Q) {
                 fs_done(&main_frame);
             }
+            if (event.keycode == KEY_F1) {
+                main_frame.width += 100;
+                fs_apply(&main_frame);
+            }
+            break;
+
+        case FE_CLOSE:
+            prn("Window closed!");
             break;
 
         default:
             break;
         }
-
-        fs_done(&main_frame);
     }
 
     return 0;
