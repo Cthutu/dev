@@ -167,6 +167,21 @@ internal void _fs_close_frame(const Frame* frame)
 // frame based on the information in the Frame struct.
 //
 
+// TODO: Implement this function to look at the state of the Frame and update
+// the frame accordingly.  This might involve changing the title, resizing the
+// window, or other updates based on the fields in the Frame struct.
+//
+// Note, that changes should only be made if they actually change the current
+// state.  This avoids firing of resizing events, for example, if the window
+// hasn't actually changed.  We can do this by tracking the state in FrameInfo
+// when events happen, or ask for the state in this function.  You can decide on
+// which is best.
+//
+// With either approach, we might be able to leverage the fs_update function by
+// setting up a Frame with the same handle and calling it.  We can then compare
+// this Frame to the given Frame to decide what needs to change.  This means
+// that either fs_update asks for the current state within, or it fetchs it from
+// cached information in FrameInfo.
 internal void _fs_update_frame(Frame* frame)
 {
     // Platform-specific frame update code goes here. This might involve
@@ -224,6 +239,23 @@ void fs_done(Frame* frame)
     _fs_push_event(frame->system, close_event);
     frame->handle = FRAME_HANDLE_CLOSED;
 }
+
+//------------------------------------------------------------------------------
+// fs_update
+
+// TODO: Implement this to update the Frame structure to match the actual
+// current state of the frame.
+//
+// There are two ways we can do this and you should decide which way is better.
+// You can either 1) track any events related to the state in Frame and store
+// that information in the associated FrameInfo; or 2) call any querying API to
+// get the state directly at his time.
+//
+// The first relies on accurate tracking of all necessary events (like resizing,
+// title change etc), and the second one might be slower since we querying all
+// the time.  If the query functions in X11 are fast, this might be fine and
+// preferable to the first solution, which requires sync code to maintained.
+void fs_update(Frame* frame) { UNUSED(frame); }
 
 //------------------------------------------------------------------------------
 // fs_loop

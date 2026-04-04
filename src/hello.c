@@ -21,6 +21,7 @@ int run(int argc, char** argv)
 
     FrameEvent event;
     while (fs_loop(&fs, &event)) {
+        fs_update(&main_frame);
         switch (event.kind) {
         case FE_KEYDOWN:
             if (event.keycode == KEY_ESCAPE || event.keycode == KEY_Q) {
