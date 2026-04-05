@@ -6,6 +6,9 @@
 
 #include <gfx/gfx.h>
 
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
+
 //------------------------------------------------------------------------------
 // _fs_find_frame_info
 
@@ -79,6 +82,25 @@ internal bool _fs_pop_event(FrameSystem* fs, FrameEvent* event)
 }
 
 //------------------------------------------------------------------------------
+// _fs_apply_resizeable
+
+internal void _fs_apply_resizeable(const Frame* frame, Window xid)
+{
+    XSizeHints hints = {0};
+    if (frame->resizable) {
+        hints.flags = 0;
+    } else {
+        hints.flags      = PMinSize | PMaxSize;
+        hints.min_width  = (i32)frame->width;
+        hints.min_height = (i32)frame->height;
+        hints.max_width  = (i32)frame->width;
+        hints.max_height = (i32)frame->height;
+    }
+
+    XSetWMNormalHints(frame->system->x_display, xid, &hints);
+}
+
+//------------------------------------------------------------------------------
 // _fs_create_frame
 //
 // This is a platform-specific function that creates a frame based on the
@@ -125,6 +147,8 @@ internal u64 _fs_create_frame(const Frame* frame)
     arena_null_terminate(temp_arena());
     XStoreName(fs->x_display, new_frame, title_c_string);
 
+    _fs_apply_resizeable(frame, new_frame);
+
     // TODO: Will there be an issue of missing important events?
     bool mapped = false;
     while (!mapped) {
@@ -139,6 +163,7 @@ internal u64 _fs_create_frame(const Frame* frame)
     FrameInfo* info = _fs_new_frame_info(fs, handle);
     info->handle    = handle;
     info->xid       = new_frame;
+    info->resizable = frame->resizable;
 
     XWindowAttributes attrs;
     if (XGetWindowAttributes(fs->x_display, new_frame, &attrs)) {
@@ -197,6 +222,7 @@ internal void _fs_update_frame(Frame* frame)
     bool moved = current.x != frame->x || current.y != frame->y;
     bool resized =
         current.width != frame->width || current.height != frame->height;
+    bool resizable_changed = info->resizable != frame->resizable;
     if (moved && resized) {
         XMoveResizeWindow(frame->system->x_display,
                           info->xid,
@@ -214,11 +240,16 @@ internal void _fs_update_frame(Frame* frame)
                       (u32)frame->height);
     }
 
+    if (resized || resizable_changed) {
+        _fs_apply_resizeable(frame, info->xid);
+    }
+    info->resizable = frame->resizable;
+
     bool title_changed = current.title.count != frame->title.count;
     if (!title_changed && current.title.count > 0) {
-        title_changed =
-            memcmp(current.title.data, frame->title.data, current.title.count) !=
-            0;
+        title_changed = memcmp(current.title.data,
+                               frame->title.data,
+                               current.title.count) != 0;
     }
 
     if (title_changed) {
