@@ -38,8 +38,13 @@ typedef struct {
     i64    y;
     u64    width;
     u64    height;
+    i64    windowed_x;
+    i64    windowed_y;
+    u64    windowed_width;
+    u64    windowed_height;
     bool   resizable;
     bool   fullscreen;
+    bool   restore_windowed_pending;
 } FrameInfo;
 
 typedef enum {
