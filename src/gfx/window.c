@@ -82,6 +82,64 @@ internal bool _fs_pop_event(FrameSystem* fs, FrameEvent* event)
 }
 
 //------------------------------------------------------------------------------
+// _fs_query_frame_position
+
+internal void _fs_apply_resizeable(const Frame* frame, Window xid);
+
+internal void _fs_query_frame_position(FrameSystem* fs,
+                                       Window       xid,
+                                       i64*         out_x,
+                                       i64*         out_y)
+{
+    if (!out_x || !out_y) {
+        return;
+    }
+
+    Window child = 0;
+    int    x     = 0;
+    int    y     = 0;
+    if (XTranslateCoordinates(
+            fs->x_display, xid, fs->x_root_window, 0, 0, &x, &y, &child)) {
+        *out_x = x;
+        *out_y = y;
+    }
+}
+
+//------------------------------------------------------------------------------
+// _fs_cache_windowed_geometry
+
+internal void _fs_cache_windowed_geometry(FrameInfo* info, const Frame* frame)
+{
+    info->windowed_x      = frame->x;
+    info->windowed_y      = frame->y;
+    info->windowed_width  = frame->width;
+    info->windowed_height = frame->height;
+}
+
+//------------------------------------------------------------------------------
+// _fs_restore_windowed_geometry
+
+internal void _fs_restore_windowed_geometry(Frame* frame, const FrameInfo* info)
+{
+    frame->x      = info->windowed_x;
+    frame->y      = info->windowed_y;
+    frame->width  = info->windowed_width;
+    frame->height = info->windowed_height;
+}
+
+//------------------------------------------------------------------------------
+// _fs_clear_resizeable_constraints
+
+internal void _fs_clear_resizeable_constraints(FrameSystem* fs, Window xid)
+{
+    Frame unconstrained = {
+        .system    = fs,
+        .resizable = true,
+    };
+    _fs_apply_resizeable(&unconstrained, xid);
+}
+
+//------------------------------------------------------------------------------
 // _fs_apply_resizeable
 
 internal void _fs_apply_resizeable(const Frame* frame, Window xid)
