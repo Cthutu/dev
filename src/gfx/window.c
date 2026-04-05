@@ -527,12 +527,13 @@ void fs_update(Frame* frame)
         if (!info->title_heap) {
             info->title_heap = ARRAY_ALLOC(u8, required_size);
         } else if (mem_size(info->title_heap) < required_size) {
-            info->title_heap = ARRAY_REALLOC(info->title_heap, u8, required_size);
+            info->title_heap =
+                ARRAY_REALLOC(info->title_heap, u8, required_size);
         }
 
         memcpy(info->title_heap, title, title_len);
         info->title_heap[title_len] = '\0';
-        frame->title = string_from(info->title_heap, title_len);
+        frame->title                = string_from(info->title_heap, title_len);
         XFree(title);
     }
 }
