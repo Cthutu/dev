@@ -26,6 +26,8 @@ typedef struct {
     i64          y;
     u64          width;
     u64          height;
+    bool         resizable;
+    bool         fullscreen;
 } Frame;
 
 typedef struct {
@@ -36,6 +38,8 @@ typedef struct {
     i64    y;
     u64    width;
     u64    height;
+    bool   resizable;
+    bool   fullscreen;
 } FrameInfo;
 
 typedef enum {
