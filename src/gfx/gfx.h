@@ -425,3 +425,19 @@ void fs_update(Frame* frame);
 // is called.
 //
 bool fs_loop(FrameSystem* fs, FrameEvent* event);
+
+//------------------------------------------------------------------------------
+// Convenience functions
+
+Frame frame_new(FrameSystem* fs, string title, u64 width, u64 height);
+
+//
+// Keyboard event processing
+//
+
+u32 frame_event_key_char(const FrameEvent* ev);
+
+bool frame_event_is_shift_pressed(const FrameEvent* ev);
+bool frame_event_is_ctrl_pressed(const FrameEvent* ev);
+bool frame_event_is_alt_pressed(const FrameEvent* ev);
+bool frame_event_is_key_pressed(const FrameEvent* ev, FrameKey key);
