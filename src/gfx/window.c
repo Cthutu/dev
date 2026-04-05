@@ -261,6 +261,191 @@ internal void _fs_update_frame(Frame* frame)
 }
 
 //------------------------------------------------------------------------------
+// Keyboard utilties
+
+internal u32 _frame_x11_keysym_to_char(XEvent xev)
+{
+    u32 key_char = 0;
+    if (xev.type == KeyPress) {
+        char buf[8];
+        int  len = XLookupString(&xev.xkey, buf, (int)sizeof(buf), NULL, NULL);
+        if (len > 0) {
+            key_char = (u8)buf[0];
+        }
+    }
+
+    return key_char;
+}
+
+internal inline FrameKey _frame_x11_keysym_to_key(KeySym sym)
+{
+    if (sym >= XK_a && sym <= XK_z) {
+        return (FrameKey)(KEY_A + (sym - XK_a));
+    }
+    if (sym >= XK_A && sym <= XK_Z) {
+        return (FrameKey)(KEY_A + (sym - XK_A));
+    }
+    if (sym >= XK_1 && sym <= XK_9) {
+        return (FrameKey)(KEY_1 + (sym - XK_1));
+    }
+    if (sym == XK_0) {
+        return KEY_0;
+    }
+    if (sym >= XK_F1 && sym <= XK_F24) {
+        return (FrameKey)(KEY_F1 + (sym - XK_F1));
+    }
+    if (sym >= XK_KP_0 && sym <= XK_KP_9) {
+        return (FrameKey)(KEY_KP_0 + (sym - XK_KP_0));
+    }
+
+    switch (sym) {
+    case XK_Return:
+        return KEY_ENTER;
+    case XK_Escape:
+        return KEY_ESCAPE;
+    case XK_BackSpace:
+        return KEY_BACKSPACE;
+    case XK_Tab:
+        return KEY_TAB;
+    case XK_space:
+        return KEY_SPACE;
+    case XK_minus:
+        return KEY_MINUS;
+    case XK_equal:
+        return KEY_EQUALS;
+    case XK_bracketleft:
+        return KEY_LEFTBRACKET;
+    case XK_bracketright:
+        return KEY_RIGHTBRACKET;
+    case XK_backslash:
+        return KEY_BACKSLASH;
+    case XK_semicolon:
+        return KEY_SEMICOLON;
+    case XK_apostrophe:
+        return KEY_APOSTROPHE;
+    case XK_grave:
+        return KEY_GRAVE;
+    case XK_comma:
+        return KEY_COMMA;
+    case XK_period:
+        return KEY_PERIOD;
+    case XK_slash:
+        return KEY_SLASH;
+
+    case XK_KP_Add:
+        return KEY_KP_PLUS;
+    case XK_KP_Subtract:
+        return KEY_KP_MINUS;
+    case XK_KP_Multiply:
+        return KEY_KP_MULTIPLY;
+    case XK_KP_Divide:
+        return KEY_KP_DIVIDE;
+    case XK_KP_Enter:
+        return KEY_KP_ENTER;
+    case XK_KP_Decimal:
+        return KEY_KP_PERIOD;
+    case XK_KP_Equal:
+        return KEY_KP_EQUALS;
+    case XK_KP_Separator:
+        return KEY_KP_COMMA;
+
+    case XK_Caps_Lock:
+        return KEY_CAPSLOCK;
+    case XK_Num_Lock:
+        return KEY_NUMLOCKCLEAR;
+    case XK_Print:
+        return KEY_PRINTSCREEN;
+    case XK_Scroll_Lock:
+        return KEY_SCROLLLOCK;
+    case XK_Pause:
+        return KEY_PAUSE;
+
+    case XK_Insert:
+        return KEY_INSERT;
+    case XK_Delete:
+        return KEY_DELETE;
+    case XK_Home:
+        return KEY_HOME;
+    case XK_End:
+        return KEY_END;
+    case XK_Prior:
+        return KEY_PAGEUP;
+    case XK_Next:
+        return KEY_PAGEDOWN;
+
+    case XK_Left:
+        return KEY_LEFT;
+    case XK_Right:
+        return KEY_RIGHT;
+    case XK_Up:
+        return KEY_UP;
+    case XK_Down:
+        return KEY_DOWN;
+
+    case XK_Shift_L:
+        return KEY_LSHIFT;
+    case XK_Shift_R:
+        return KEY_RSHIFT;
+    case XK_Control_L:
+        return KEY_LCTRL;
+    case XK_Control_R:
+        return KEY_RCTRL;
+    case XK_Alt_L:
+        return KEY_LALT;
+    case XK_Alt_R:
+        return KEY_RALT;
+    case XK_Super_L:
+        return KEY_LGUI;
+    case XK_Super_R:
+        return KEY_RGUI;
+    case XK_Menu:
+        return KEY_MENU;
+
+    default:
+        return KEY_UNKNOWN;
+    }
+}
+
+internal inline FrameKeyShift _frame_x11_modifiers(unsigned int state,
+                                                   KeySym       sym)
+{
+    FrameKeyShift mods = 0;
+    if (state & ShiftMask) {
+        mods |= KEY_SHIFT_LEFT;
+    }
+    if (state & ControlMask) {
+        mods |= KEY_CTRL_LEFT;
+    }
+    if (state & Mod1Mask) {
+        mods |= KEY_ALT_LEFT;
+    }
+
+    switch (sym) {
+    case XK_Shift_L:
+        mods |= KEY_SHIFT_LEFT;
+        break;
+    case XK_Shift_R:
+        mods |= KEY_SHIFT_RIGHT;
+        break;
+    case XK_Control_L:
+        mods |= KEY_CTRL_LEFT;
+        break;
+    case XK_Control_R:
+        mods |= KEY_CTRL_RIGHT;
+        break;
+    case XK_Alt_L:
+        mods |= KEY_ALT_LEFT;
+        break;
+    case XK_Alt_R:
+        mods |= KEY_ALT_RIGHT;
+        break;
+    default:
+        break;
+    }
+
+    return mods;
+}
+//------------------------------------------------------------------------------
 // fs_init
 
 void fs_init(FrameSystem* fs)
@@ -379,13 +564,12 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
 
         switch (xev.type) {
         case KeyPress:
-            event.kind    = FE_KEYDOWN;
-            event.keycode = xev.xkey.keycode;
-            break;
-
         case KeyRelease:
-            event.kind    = FE_KEYUP;
-            event.keycode = xev.xkey.keycode;
+            event.kind      = (xev.type == KeyPress) ? FE_KEYDOWN : FE_KEYUP;
+            KeySym keysym   = XLookupKeysym(&xev.xkey, 0);
+            event.keycode   = _frame_x11_keysym_to_key(keysym);
+            event.modifiers = _frame_x11_modifiers(xev.xkey.state, keysym);
+            event.key_char  = _frame_x11_keysym_to_char(xev);
             break;
 
         case MotionNotify:
@@ -395,47 +579,68 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
             break;
 
         case ButtonPress:
-            event.kind = FE_MOUSEBUTTONDOWN;
-            break;
-
         case ButtonRelease:
-            event.kind = FE_MOUSEBUTTONUP;
+            event.kind    = (xev.type == ButtonPress) ? FE_MOUSEBUTTONDOWN
+                                                      : FE_MOUSEBUTTONUP;
+            event.mouse_x = xev.xbutton.x;
+            event.mouse_y = xev.xbutton.y;
+            event.button  = 0;
+            switch (xev.xbutton.button) {
+            case Button1:
+                event.button = MOUSE_BUTTON_LEFT;
+                break;
+            case Button2:
+                event.button = MOUSE_BUTTON_MIDDLE;
+                break;
+            case Button3:
+                event.button = MOUSE_BUTTON_RIGHT;
+                break;
+            case Button4:
+                event.button = MOUSE_BUTTON_SIDE_1;
+                break;
+            case Button5:
+                event.button = MOUSE_BUTTON_SIDE_2;
+                break;
+            default:
+                should_send_event = false;
+            }
             break;
 
         case ConfigureNotify:
-        {
-            bool moved =
-                info->x != xev.xconfigure.x || info->y != xev.xconfigure.y;
-            bool resized = info->width != (u64)xev.xconfigure.width ||
-                           info->height != (u64)xev.xconfigure.height;
+            {
+                bool moved =
+                    info->x != xev.xconfigure.x || info->y != xev.xconfigure.y;
+                bool resized = info->width != (u64)xev.xconfigure.width ||
+                               info->height != (u64)xev.xconfigure.height;
 
-            info->x      = xev.xconfigure.x;
-            info->y      = xev.xconfigure.y;
-            info->width  = (u64)xev.xconfigure.width;
-            info->height = (u64)xev.xconfigure.height;
+                info->x           = xev.xconfigure.x;
+                info->y           = xev.xconfigure.y;
+                info->width       = (u64)xev.xconfigure.width;
+                info->height      = (u64)xev.xconfigure.height;
 
-            should_send_event = false;
+                should_send_event = false;
 
-            if (moved) {
-                _fs_push_event(fs,
-                               (FrameEvent){
-                                   .kind         = FE_MOVE,
-                                   .frame_handle = info->handle,
-                                   .x            = info->x,
-                                   .y            = info->y,
-                               });
+                if (moved) {
+                    _fs_push_event(fs,
+                                   (FrameEvent){
+                                       .kind         = FE_MOVE,
+                                       .frame_handle = info->handle,
+                                       .x            = info->x,
+                                       .y            = info->y,
+                                   });
+                }
+
+                if (resized) {
+                    _fs_push_event(fs,
+                                   (FrameEvent){
+                                       .kind         = FE_RESIZE,
+                                       .frame_handle = info->handle,
+                                       .width        = info->width,
+                                       .height       = info->height,
+                                   });
+                }
             }
-
-            if (resized) {
-                _fs_push_event(fs,
-                               (FrameEvent){
-                                   .kind         = FE_RESIZE,
-                                   .frame_handle = info->handle,
-                                   .width        = info->width,
-                                   .height       = info->height,
-                               });
-            }
-        } break;
+            break;
 
         case ClientMessage:
             should_send_event = false;
