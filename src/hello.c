@@ -10,13 +10,8 @@ int run(int argc, char** argv)
     FrameSystem fs;
     fs_init(&fs);
 
-    Frame main_frame = (Frame){
-        .handle = FRAME_HANDLE_NEW,
-        .system = &fs,
-        .title  = string_from_cstr("Hello, World!"),
-        .width  = 800,
-        .height = 600,
-    };
+    Frame main_frame =
+        frame_new(&fs, string_from_cstr("Hello, World!"), 800, 600);
     fs_apply(&main_frame);
 
     FrameEvent event;
@@ -24,13 +19,26 @@ int run(int argc, char** argv)
         fs_update(&main_frame);
         switch (event.kind) {
         case FE_KEYDOWN:
-            if (event.keycode == KEY_ESCAPE || event.keycode == KEY_Q) {
+            if (frame_event_is_key_pressed(&event, KEY_ESCAPE) ||
+                frame_event_is_key_pressed(&event, KEY_Q)) {
                 fs_done(&main_frame);
             }
-            if (event.keycode == KEY_F1) {
-                main_frame.width += 100;
+
+            if (frame_event_is_alt_pressed(&event) &&
+                frame_event_is_key_pressed(&event, KEY_ENTER)) {
+                main_frame.fullscreen = !main_frame.fullscreen;
                 fs_apply(&main_frame);
             }
+
+            if (frame_event_is_key_pressed(&event, KEY_R)) {
+                main_frame.resizable = !main_frame.resizable;
+                fs_apply(&main_frame);
+            }
+
+            prn("Key down: %c (code: %d, modifiers: %d)",
+                event.key_char,
+                event.keycode,
+                event.modifiers);
             break;
 
         case FE_MOVE:
