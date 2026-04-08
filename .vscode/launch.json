@@ -5,8 +5,10 @@
       "name": "Launch Executable (Linux)",
       "type": "lldb",
       "request": "launch",
-      "program": "${workspaceFolder}/_bin/hello-debug",
-      "args": ["build"],
+      "program": "${workspaceFolder}/_bin/demo-server-debug",
+      "args": [
+        "build"
+      ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Compile"
     }
