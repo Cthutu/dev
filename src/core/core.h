@@ -627,6 +627,18 @@ string string_format(Arena* arena, cstr fmt, ...);
 string string_from(u8* data, usize size);
 
 //------------------------------------------------------------------------------
+// String processing
+
+bool string_equals(string a, string b);
+bool string_equals_cstr(string a, cstr b);
+bool string_split(string  str,
+                  cstr    delimiter,
+                  string* out_left,
+                  string* out_right);
+
+bool string_to_u64(string str, u64* out_value);
+
+//------------------------------------------------------------------------------
 // StringBuilder API
 
 typedef struct {

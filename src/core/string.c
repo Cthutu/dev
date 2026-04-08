@@ -59,6 +59,63 @@ string string_from(u8* data, usize size)
 }
 
 //------------------------------------------------------------------------------
+// String processing
+
+bool string_equals(string a, string b)
+{
+    if (a.count != b.count) {
+        return false;
+    }
+    return memcmp(a.data, b.data, a.count) == 0;
+}
+
+bool string_equals_cstr(string a, cstr b)
+{
+    string b_str = string_from_cstr(b);
+    return string_equals(a, b_str);
+}
+
+bool string_split(string  str,
+                  cstr    delimiter,
+                  string* out_left,
+                  string* out_right)
+{
+    for (usize i = 0; i < str.count; i++) {
+        if (i + strlen(delimiter) > str.count) {
+            break;
+        }
+
+        if (memcmp(str.data + i, delimiter, strlen(delimiter)) == 0) {
+            if (out_left) {
+                *out_left = (string){.data = str.data, .count = i};
+            }
+            if (out_right) {
+                *out_right =
+                    (string){.data  = str.data + i + strlen(delimiter),
+                             .count = str.count - i - strlen(delimiter)};
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool string_to_u64(string str, u64* out_value)
+{
+    u64 value = 0;
+    for (usize i = 0; i < str.count; i++) {
+        char c = (char)str.data[i];
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        value = value * 10 + (u64)(c - '0');
+    }
+    *out_value = value;
+    return true;
+}
+
+//------------------------------------------------------------------------------
 // StringBuilder implementation
 
 void sb_init(StringBuilder* sb, Arena* arena)
