@@ -7,6 +7,24 @@
 #include <core/core.h>
 
 //------------------------------------------------------------------------------
+// Client:
+//
+//      1. Create a socket with net_socket().
+//      2. Connect to a URL via the socket: net_connect(socket, url)
+//      3. Send and receive messages over the socket.
+//          - net_send(socket, buffer, len)
+//          - net_recv(socket, buffer, len, recv_len)
+//      4. When done close socket: net_close(sock)
+//
+// Server:
+//
+//      1. Create a socket with net_socket().
+//      2. Bind to a socket to recevie messages: net_bind(socket, url)
+//      3. Send and receive messages over the socket.
+//          - net_send(socket, buffer, len)
+//          - net_recv(socket, buffer, len, recv_len)
+//      4. When done close socket: net_close(sock)
+//------------------------------------------------------------------------------
 // Macros
 
 #define NET_FAILED(result) ((result) != NET_OK)
