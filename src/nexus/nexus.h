@@ -46,6 +46,14 @@ typedef struct {
 // Socket API
 
 Net_Socket net_socket(void);
+void       net_close(Net_Socket* sock);
 
 Net_Result net_bind(Net_Socket* sock, cstr url);
-Net_Result net_listen(Net_Socket* sock, cstr url);
+Net_Result net_connect(Net_Socket* sock, cstr url);
+
+Net_Result net_send(Net_Socket* sock, const void* buffer, usize len);
+Net_Result
+net_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len);
+
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
