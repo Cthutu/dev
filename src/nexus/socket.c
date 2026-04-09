@@ -104,19 +104,13 @@ Net_Result net_bind(Net_Socket* out_sock, cstr url)
         }
     }
 
-    return NET_OK;
-}
+    //
+    // Start listening on it
+    //
 
-Net_Result net_listen(Net_Socket* sock, cstr url)
-{
-    Net_Result result = net_bind(sock, url);
-    if (NET_FAILED(result)) {
-        return result;
-    }
-
-    if (listen(sock->fd, SOMAXCONN) < 0) {
-        close(sock->fd);
-        sock->fd = -1;
+    if (listen(fd, SOMAXCONN) < 0) {
+        close(fd);
+        out_sock->fd = -1;
         return NET_ERROR;
     }
 
