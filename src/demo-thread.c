@@ -10,19 +10,24 @@
 //------------------------------------------------------------------------------
 
 typedef struct {
-    Thread thread;
-    u32    number;
-    u32    delay;
+    Channel_Rx  channel;
+    CancelToken cancel_token;
 } WorkerArgs;
 
 void* worker_thread(void* arg)
 {
-    WorkerArgs* args = arg;
-    prn("Hello from the worker thread %u!", args->number);
-    thread_sleep_ms(args->delay);
-    prn("Worker thread %u done!", args->number);
+    WorkerArgs* args  = arg;
+    usize       count = 0;
 
-    return nullptr;
+    while (!thread_is_cancelled(&args->cancel_token)) {
+        string msg = channel_get_string(&args->channel, &args->cancel_token);
+        if (msg.data) {
+            prn("[%u] Worker received message: " STRINGP,
+                ++count,
+                STRINGV(msg));
+            channel_consume_string(&args->channel, msg);
+        }
+    }
 }
 
 int run(int argc, char** argv)
@@ -30,20 +35,33 @@ int run(int argc, char** argv)
     UNUSED(argc);
     UNUSED(argv);
 
-    WorkerArgs args[] = {
-        {.thread = 0, .number = 1, .delay = 2000},
-        {.thread = 0, .number = 2, .delay = 1500},
-    };
+    WorkerArgs args = {0};
+    Channel    channel;
+    Channel_Tx tx;
+    u8         channel_buffer[1024];
 
-    prn("Hello from the main thread!");
+    channel_init(
+        &channel, channel_buffer, sizeof(channel_buffer), &tx, &args.channel);
 
-    for (size_t i = 0; i < sizeof(args) / sizeof(args[0]); i++) {
-        thread_create(&args[i].thread, worker_thread, &args[i]);
+    Thread thread;
+    if (!thread_create(&thread, worker_thread, &args)) {
+        kill("Failed to create worker thread");
     }
 
-    for (size_t i = 0; i < sizeof(args) / sizeof(args[0]); i++) {
-        thread_join(&args[i].thread);
+    int count = 5000;
+    for (int i = 0; i < count; i++) {
+        channel_send_string(&tx, S("Hello from the main thread!"));
+        channel_send_string(
+            &tx, S("This is a demo of thread communication using channels."));
     }
+
+    thread_sleep_ms(1000); // Give the worker some time to process the message
+    thread_cancel(&args.cancel_token);
+    thread_join(&thread);
+
+    channel_tx_done(&tx);
+    channel_rx_done(&args.channel);
+    channel_done(&channel);
 
     return 0;
 }
