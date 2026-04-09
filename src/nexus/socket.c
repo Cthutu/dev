@@ -74,5 +74,51 @@ Net_Result net_bind(Net_Socket* out_sock, cstr url)
     }
 
     out_sock->fd = fd;
+
+    //
+    // Set up the socket address
+    //
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(endpoint.port);
+    memcpy(&addr.sin_addr, endpoint.ip, 4); // IPv4-mapped IPv
+
+    //
+    // Bind the socket to the IP address
+    //
+
+    int result = bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+    if (result < 0) {
+        close(fd);
+        out_sock->fd = -1;
+        switch (errno) {
+        case ENETDOWN:
+            return NET_NO_NETWORK;
+        case EACCES:
+            return NET_ACCESS_DENIED;
+        case EADDRINUSE:
+            return NET_PORT_IN_USE;
+        default:
+            return NET_ERROR;
+        }
+    }
+
+    return NET_OK;
+}
+
+Net_Result net_listen(Net_Socket* sock, cstr url)
+{
+    Net_Result result = net_bind(sock, url);
+    if (NET_FAILED(result)) {
+        return result;
+    }
+
+    if (listen(sock->fd, SOMAXCONN) < 0) {
+        close(sock->fd);
+        sock->fd = -1;
+        return NET_ERROR;
+    }
+
     return NET_OK;
 }
