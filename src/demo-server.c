@@ -13,10 +13,14 @@ int run(int argc, char* argv[])
     UNUSED(argv);
     prn("Demo server running...");
 
-    Net_Socket sock;
-    if (NET_FAILED(net_socket(&sock, "tcp://localhost:8080"))) {
+    cstr url        = "tcp://127.0.0.1:8080";
+
+    Net_Socket sock = net_socket();
+    if (NET_FAILED(net_bind(&sock, url))) {
         kill("Failed to create socket");
     }
+
+    prn("Bound to %s", url);
 
     return 0;
 }
