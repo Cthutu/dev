@@ -195,6 +195,12 @@
         }                                                                      \
     } while (0)
 
+#if DEBUG
+#    define VERIFY(condition, ...) ASSERT(condition, __VA_ARGS__)
+#else
+#    define VERIFY(condition, ...) (void)(condition)
+#endif
+
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define CLAMP(x, min, max) MAX((min), MIN((x), (max)))
@@ -625,6 +631,8 @@ string string_from_cstr(const char* cstr);
 string string_formatv(Arena* arena, cstr fmt, va_list args);
 string string_format(Arena* arena, cstr fmt, ...);
 string string_from(u8* data, usize size);
+
+#define S(str) string_from_cstr(str)
 
 //------------------------------------------------------------------------------
 // String processing
