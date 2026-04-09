@@ -18,6 +18,8 @@ typedef HANDLE Thread;
 typedef pthread_t Thread;
 #endif
 
+typedef _Atomic bool CancelToken;
+
 //------------------------------------------------------------------------------
 // Thread API
 

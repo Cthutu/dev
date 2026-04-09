@@ -33,6 +33,8 @@ void thread_yield() { SwitchToThread(); }
 
 void thread_sleep_ms(u32 milliseconds) { Sleep(milliseconds); }
 
+Thread thread_this() { return GetCurrentThread(); }
+
 //------------------------------------------------------------------------------
 // POSIX implementation
 
@@ -59,11 +61,20 @@ void thread_sleep_ms(u32 milliseconds)
     nanosleep(&ts, NULL);
 }
 
+Thread thread_this() { return pthread_self(); }
+
 //------------------------------------------------------------------------------
 
 #else
 #    error "Thread API not implemented for this platform"
 #endif
+
+//------------------------------------------------------------------------------
+// Cancel tokens
+
+void thread_cancel(CancelToken* token) { *token = true; }
+
+bool thread_is_cancelled(CancelToken* token) { return *token; }
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
