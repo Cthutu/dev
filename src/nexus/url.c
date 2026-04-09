@@ -7,6 +7,63 @@
 #include <nexus/internal.h>
 
 //------------------------------------------------------------------------------
+// _net_parse_ip4_address
+
+internal bool _net_process_ip4_address(Net_Endpoint* in_out_ep)
+{
+    u64   dot_count = 0;
+    u64   num_count = 0;
+    usize ip_index  = 0;
+
+    string host     = in_out_ep->host;
+
+    enum {
+        EXPECT_NUM,
+        EXPECT_DOT,
+    } state = EXPECT_NUM;
+
+    for (usize i = 0; i < host.count;) {
+        switch (state) {
+        case EXPECT_NUM:
+            {
+                u64 num = 0;
+                if (host.data[i] < '0' || host.data[i] > '9') {
+                    return false; // Expected number
+                }
+                while (i < host.count && host.data[i] >= '0' &&
+                       host.data[i] <= '9') {
+                    num = num * 10 + (host.data[i] - '0');
+                    i++;
+                    if (num > 255) {
+                        return false; // Invalid number in IP
+                    }
+                }
+                if (num_count >= 4) {
+                    return false; // Too many numbers
+                }
+                num_count++;
+                state                     = EXPECT_DOT;
+                in_out_ep->ip[ip_index++] = (u8)num;
+            }
+            break;
+
+        case EXPECT_DOT:
+            if (host.data[i++] != '.') {
+                return false; // Expected dot
+            }
+            dot_count++;
+            if (dot_count > 3) {
+                return false; // Too many dots
+            }
+            state = EXPECT_NUM;
+            break;
+        }
+    }
+
+    return true;
+}
+
+//------------------------------------------------------------------------------
 // _net_parse_url
 
 bool _net_parse_url(cstr url, Net_Endpoint* out_ep)
@@ -40,7 +97,12 @@ bool _net_parse_url(cstr url, Net_Endpoint* out_ep)
     // Host parsing
     //
 
-    out_ep->host = (cstr)host_str.data;
+    out_ep->host = host_str;
+
+    if (!_net_process_ip4_address(out_ep)) {
+        // TODO: Do a DNS look up
+        return false;
+    }
 
     //
     // Port parsing
