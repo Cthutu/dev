@@ -21,25 +21,31 @@ typedef enum {
     NET_OUT_OF_FD,   // No file descriptors available
     NET_PROTOCOL_NOT_SUPPORTED, // The protocol doesn't exist (e.g. TCP, UDP
     // etc).
-    NET_ERROR, // A general error occurred - dev needs to investigate
+    NET_PORT_IN_USE,   // The port is already in use by another socket
+    NET_ACCESS_DENIED, // Permission denied when trying to bind to the port
+    NET_ERROR,         // A general error occurred - dev needs to investigate
 } Net_Result;
 
 typedef struct {
     int fd; // Socket file descriptor
 } Net_Socket;
 
-typedef enum {
+typedef enum : u8 {
     NET_PROTO_TCP,
     NET_PROTO_UDP,
 } Net_Protocol;
 
 typedef struct {
-    Net_Protocol proto;
-    cstr         host;
+    u8           ip[16]; // IPv6 address (or IPv4-mapped IPv6)
+    string       host;
     u16          port;
+    Net_Protocol proto;
 } Net_Endpoint;
 
 //------------------------------------------------------------------------------
 // Socket API
 
-Net_Result net_socket(Net_Socket* out_sock, cstr url);
+Net_Socket net_socket(void);
+
+Net_Result net_bind(Net_Socket* sock, cstr url);
+Net_Result net_listen(Net_Socket* sock, cstr url);
