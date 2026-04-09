@@ -17,7 +17,7 @@ int run(int argc, char* argv[])
 
     Net_Socket sock = net_socket();
     if (NET_FAILED(net_bind(&sock, url))) {
-        kill("Failed to create socket");
+        kill("Failed to create binding");
     }
 
     prn("Bound to %s", url);
