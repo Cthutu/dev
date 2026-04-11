@@ -13,8 +13,8 @@ int run(int argc, char* argv[])
     UNUSED(argv);
     prn("Demo client running...");
 
-    cstr   url      = "tcp://127.0.0.1:8080";
-    string message  = S("Hello from the client!");
+    cstr   url        = "tcp://127.0.0.1:8080";
+    string message    = S("Hello from the client!");
 
     Net_Socket sock   = net_socket();
     Net_Result result = net_connect(&sock, url);

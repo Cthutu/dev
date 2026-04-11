@@ -52,7 +52,8 @@ typedef struct {
         long long   _cmp_b      = (long long)_test_val_b;                      \
         if (_cmp_a != _cmp_b) {                                                \
             char _detail[128];                                                 \
-            snprintf(_detail, sizeof(_detail), "%lld != %lld", _cmp_a, _cmp_b);\
+            snprintf(                                                          \
+                _detail, sizeof(_detail), "%lld != %lld", _cmp_a, _cmp_b);     \
             test_record_failure(__FILE__, __LINE__, #a " == " #b, _detail);    \
             test_current_failures++;                                           \
             test_total_failures++;                                             \
@@ -64,7 +65,7 @@ typedef struct {
         test_total_assertions++;                                               \
         if (strcmp((a), (b)) != 0) {                                           \
             char _detail[256];                                                 \
-            snprintf(_detail, sizeof(_detail), "\"%s\" != \"%s\"", (a), (b)); \
+            snprintf(_detail, sizeof(_detail), "\"%s\" != \"%s\"", (a), (b));  \
             test_record_failure(__FILE__, __LINE__, #a " == " #b, _detail);    \
             test_current_failures++;                                           \
             test_total_failures++;                                             \
@@ -100,7 +101,8 @@ typedef struct {
         long long   _cmp_b      = (long long)_test_val_b;                      \
         if (_cmp_a <= _cmp_b) {                                                \
             char _detail[128];                                                 \
-            snprintf(_detail, sizeof(_detail), "%lld <= %lld", _cmp_a, _cmp_b);\
+            snprintf(                                                          \
+                _detail, sizeof(_detail), "%lld <= %lld", _cmp_a, _cmp_b);     \
             test_record_failure(__FILE__, __LINE__, #a " > " #b, _detail);     \
             test_current_failures++;                                           \
             test_total_failures++;                                             \
@@ -116,7 +118,8 @@ typedef struct {
         long long   _cmp_b      = (long long)_test_val_b;                      \
         if (_cmp_a >= _cmp_b) {                                                \
             char _detail[128];                                                 \
-            snprintf(_detail, sizeof(_detail), "%lld >= %lld", _cmp_a, _cmp_b);\
+            snprintf(                                                          \
+                _detail, sizeof(_detail), "%lld >= %lld", _cmp_a, _cmp_b);     \
             test_record_failure(__FILE__, __LINE__, #a " < " #b, _detail);     \
             test_current_failures++;                                           \
             test_total_failures++;                                             \
@@ -132,7 +135,7 @@ typedef struct {
         long long   _cmp_b      = (long long)_test_val_b;                      \
         if (_cmp_a < _cmp_b) {                                                 \
             char _detail[128];                                                 \
-            snprintf(_detail, sizeof(_detail), "%lld < %lld", _cmp_a, _cmp_b);\
+            snprintf(_detail, sizeof(_detail), "%lld < %lld", _cmp_a, _cmp_b); \
             test_record_failure(__FILE__, __LINE__, #a " >= " #b, _detail);    \
             test_current_failures++;                                           \
             test_total_failures++;                                             \
@@ -148,7 +151,7 @@ typedef struct {
         long long   _cmp_b      = (long long)_test_val_b;                      \
         if (_cmp_a > _cmp_b) {                                                 \
             char _detail[128];                                                 \
-            snprintf(_detail, sizeof(_detail), "%lld > %lld", _cmp_a, _cmp_b);\
+            snprintf(_detail, sizeof(_detail), "%lld > %lld", _cmp_a, _cmp_b); \
             test_record_failure(__FILE__, __LINE__, #a " <= " #b, _detail);    \
             test_current_failures++;                                           \
             test_total_failures++;                                             \
@@ -160,9 +163,12 @@ typedef struct {
         test_total_assertions++;                                               \
         if (memcmp((p1), (p2), (size)) != 0) {                                 \
             char _detail[128];                                                 \
-            snprintf(_detail, sizeof(_detail),                                 \
-                     "memory blocks differ for %zu bytes", (size_t)(size));    \
-            test_record_failure(__FILE__, __LINE__, "memory equality", _detail);\
+            snprintf(_detail,                                                  \
+                     sizeof(_detail),                                          \
+                     "memory blocks differ for %zu bytes",                     \
+                     (size_t)(size));                                          \
+            test_record_failure(                                               \
+                __FILE__, __LINE__, "memory equality", _detail);               \
             test_current_failures++;                                           \
             test_total_failures++;                                             \
         }                                                                      \

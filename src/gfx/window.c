@@ -86,10 +86,8 @@ internal bool _fs_pop_event(FrameSystem* fs, FrameEvent* event)
 
 internal void _fs_apply_resizeable(const Frame* frame, Window xid);
 
-internal void _fs_query_frame_position(FrameSystem* fs,
-                                       Window       xid,
-                                       i64*         out_x,
-                                       i64*         out_y)
+internal void
+_fs_query_frame_position(FrameSystem* fs, Window xid, i64* out_x, i64* out_y)
 {
     if (!out_x || !out_y) {
         return;
@@ -171,9 +169,8 @@ internal void _fs_apply_fullscreen(const Frame* frame, Window xid, bool enable)
             XInternAtom(frame->system->x_display, "_NET_WM_STATE", False);
     }
     if (fullscreen_atom == None) {
-        fullscreen_atom = XInternAtom(frame->system->x_display,
-                                      "_NET_WM_STATE_FULLSCREEN",
-                                      False);
+        fullscreen_atom = XInternAtom(
+            frame->system->x_display, "_NET_WM_STATE_FULLSCREEN", False);
     }
 
     XEvent xev               = {0};
@@ -254,11 +251,11 @@ internal u64 _fs_create_frame(const Frame* frame)
         }
     }
 
-    FrameInfo* info = _fs_new_frame_info(fs, handle);
-    info->handle    = handle;
-    info->xid       = new_frame;
-    info->resizable = frame->resizable;
-    info->fullscreen = false;
+    FrameInfo* info                = _fs_new_frame_info(fs, handle);
+    info->handle                   = handle;
+    info->xid                      = new_frame;
+    info->resizable                = frame->resizable;
+    info->fullscreen               = false;
     info->restore_windowed_pending = false;
 
     XWindowAttributes attrs;
@@ -272,14 +269,13 @@ internal u64 _fs_create_frame(const Frame* frame)
         info->height = frame->height;
     }
     _fs_query_frame_position(fs, new_frame, &info->x, &info->y);
-    _fs_cache_windowed_geometry(
-        info,
-        &(Frame){
-            .x      = info->x,
-            .y      = info->y,
-            .width  = info->width,
-            .height = info->height,
-        });
+    _fs_cache_windowed_geometry(info,
+                                &(Frame){
+                                    .x      = info->x,
+                                    .y      = info->y,
+                                    .width  = info->width,
+                                    .height = info->height,
+                                });
 
     if (frame->fullscreen) {
         if (!frame->resizable) {
@@ -333,7 +329,7 @@ internal void _fs_update_frame(Frame* frame)
     bool moved = current.x != frame->x || current.y != frame->y;
     bool resized =
         current.width != frame->width || current.height != frame->height;
-    bool resizable_changed = info->resizable != frame->resizable;
+    bool resizable_changed  = info->resizable != frame->resizable;
     bool fullscreen_changed = info->fullscreen != frame->fullscreen;
 
     if (!info->fullscreen && !info->restore_windowed_pending) {
@@ -650,10 +646,9 @@ void fs_update(Frame* frame)
         info->width   = frame->width;
         info->height  = frame->height;
     }
-    _fs_query_frame_position(
-        frame->system, info->xid, &frame->x, &frame->y);
-    info->x = frame->x;
-    info->y = frame->y;
+    _fs_query_frame_position(frame->system, info->xid, &frame->x, &frame->y);
+    info->x     = frame->x;
+    info->y     = frame->y;
 
     char* title = NULL;
     if (XFetchName(frame->system->x_display, info->xid, &title) > 0 && title) {
@@ -748,13 +743,12 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
 
         case ConfigureNotify:
             {
-                bool moved =
-                    false;
+                bool moved   = false;
                 bool resized = info->width != (u64)xev.xconfigure.width ||
                                info->height != (u64)xev.xconfigure.height;
 
-                i64 new_x         = info->x;
-                i64 new_y         = info->y;
+                i64 new_x = info->x;
+                i64 new_y = info->y;
                 _fs_query_frame_position(fs, info->xid, &new_x, &new_y);
                 moved             = info->x != new_x || info->y != new_y;
 
@@ -786,20 +780,19 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
                 }
 
                 if (info->restore_windowed_pending) {
-                    bool restored =
-                        info->x == info->windowed_x &&
-                        info->y == info->windowed_y &&
-                        info->width == info->windowed_width &&
-                        info->height == info->windowed_height;
+                    bool restored = info->x == info->windowed_x &&
+                                    info->y == info->windowed_y &&
+                                    info->width == info->windowed_width &&
+                                    info->height == info->windowed_height;
 
                     if (restored) {
                         info->restore_windowed_pending = false;
                         if (!info->resizable) {
                             Frame restore_frame = {
-                                .system     = fs,
-                                .width      = info->windowed_width,
-                                .height     = info->windowed_height,
-                                .resizable  = false,
+                                .system    = fs,
+                                .width     = info->windowed_width,
+                                .height    = info->windowed_height,
+                                .resizable = false,
                             };
                             _fs_apply_resizeable(&restore_frame, info->xid);
                         }

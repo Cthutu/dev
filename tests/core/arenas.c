@@ -21,8 +21,8 @@ TEST_CASE(arena, alloc_restore_reset)
     TEST_ASSERT_NOT_NULL(first);
     TEST_ASSERT_EQ(arena_offset(&arena, first), 0);
 
-    u64   mark = arena_store(&arena);
-    u8*   next = arena_alloc(&arena, 16);
+    u64 mark = arena_store(&arena);
+    u8* next = arena_alloc(&arena, 16);
     TEST_ASSERT_EQ(arena_offset(&arena, next), 8);
 
     arena_restore(&arena, mark);

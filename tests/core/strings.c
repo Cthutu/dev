@@ -9,7 +9,7 @@ TEST_CASE(string, from_cstr_and_from_bytes)
     TEST_ASSERT_EQ(hello.count, 5);
     TEST_ASSERT_EQ(hello.data[0], 'h');
 
-    u8 raw[]     = {'a', 'b', 'c'};
+    u8     raw[] = {'a', 'b', 'c'};
     string bytes = string_from(raw, 3);
     TEST_ASSERT_EQ(bytes.count, 3);
     TEST_ASSERT_EQ(bytes.data[2], 'c');

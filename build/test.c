@@ -11,9 +11,9 @@ TestCategory test_categories[MAX_CATEGORIES];
 int          test_category_count = 0;
 
 RegisteredTest test_registry[MAX_REGISTERED_TESTS];
-int            test_registry_count = 0;
+int            test_registry_count       = 0;
 
-int test_verbose_output            = TEST_VERBOSE;
+int test_verbose_output                  = TEST_VERBOSE;
 
 static const char* test_current_category = NULL;
 static const char* test_current_name     = NULL;
@@ -94,7 +94,7 @@ void test_parse_args(int argc, char* argv[], TestOptions* options)
                 char* filter = argv[++i];
                 char* colon  = strchr(filter, ':');
                 if (colon) {
-                    *colon               = '\0';
+                    *colon                = '\0';
                     options->filter_scope = filter;
                     options->filter_name  = colon + 1;
                 } else {
@@ -218,7 +218,8 @@ int test_selected_count(const TestOptions* options)
 
 void test_emit_suite_start(const TestOptions* options)
 {
-    fprintf(stdout, "{\"event\":\"suite_start\",\"selected_tests\":%d}\n",
+    fprintf(stdout,
+            "{\"event\":\"suite_start\",\"selected_tests\":%d}\n",
             test_selected_count(options));
     fflush(stdout);
 }
@@ -255,7 +256,8 @@ void test_end_test(const char* category, const char* name)
     test_write_json_string(stdout, category);
     fprintf(stdout, ",\"name\":");
     test_write_json_string(stdout, name);
-    fprintf(stdout, ",\"passed\":%s,\"failures\":%d}\n",
+    fprintf(stdout,
+            ",\"passed\":%s,\"failures\":%d}\n",
             passed ? "true" : "false",
             test_current_failures);
     fflush(stdout);
