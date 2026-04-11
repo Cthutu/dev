@@ -379,15 +379,11 @@ Net_Result net_connect(Net_Socket* out_sock, cstr url)
 //------------------------------------------------------------------------------
 // net_recv
 //
-// Receives data from the socket.  If the socket is in the
-// `NET_STATE_WAITING_CONNECTION` state, this will first accept an incoming
-// connection (if TCP) and then receive data from the accepted connection.  If
-// the socket is already connected, it will just receive data from the existing
-// connection.
-//
-// On success, the received data is written to the provided buffer and the
-// number of bytes received is written to `out_recv_len`.  On failure, the
-// socket is left unchanged and an appropriate error code is returned.
+// Receives data from the socket. If the socket is waiting for an incoming TCP
+// connection, this will accept one first and then receive from it. On success,
+// the received data is written to the provided buffer and the number of bytes
+// received is written to `out_recv_len`. On failure, the socket is left
+// unchanged and an appropriate error code is returned.
 //------------------------------------------------------------------------------
 
 Net_Result
@@ -395,7 +391,6 @@ net_recv(Net_Socket* sock, void* buffer, usize buffer_len, usize* out_recv_len)
 {
     if (sock->state == NET_STATE_WAITING_CONNECTION) {
         if (sock->proto == NET_PROTO_TCP) {
-            // Accept an incoming connection if TCP
             int listen_fd = sock->fd;
             int client_fd = accept(sock->fd, NULL, NULL);
             if (client_fd < 0) {
@@ -411,9 +406,8 @@ net_recv(Net_Socket* sock, void* buffer, usize buffer_len, usize* out_recv_len)
                 }
             }
 
-            // Replace the listening socket with the accepted connection. This
-            // keeps the one-socket API simple, but it also means this socket
-            // only handles a single TCP peer.
+            // This preserves the minimal one-socket API: the listener becomes
+            // the accepted client after the first receive.
             close(listen_fd);
             sock->fd = client_fd;
         }
