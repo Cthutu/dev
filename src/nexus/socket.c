@@ -39,6 +39,42 @@ void net_close(Net_Socket* sock)
 }
 
 //------------------------------------------------------------------------------
+// net_result_string
+//
+// Converts a result code into a short readable string suitable for logging.
+//------------------------------------------------------------------------------
+
+cstr net_result_string(Net_Result result)
+{
+    switch (result) {
+    case NET_OK:
+        return "ok";
+    case NET_INVALID_URL:
+        return "invalid url";
+    case NET_NO_NETWORK:
+        return "no network";
+    case NET_OUT_OF_FD:
+        return "out of file descriptors";
+    case NET_PROTOCOL_NOT_SUPPORTED:
+        return "protocol not supported";
+    case NET_PORT_IN_USE:
+        return "port in use";
+    case NET_ACCESS_DENIED:
+        return "access denied";
+    case NET_SOCKET_BUSY:
+        return "socket busy";
+    case NET_NOT_CONNECTED:
+        return "not connected";
+    case NET_CLOSED:
+        return "connection closed";
+    case NET_ERROR:
+        return "network error";
+    default:
+        return "unknown network result";
+    }
+}
+
+//------------------------------------------------------------------------------
 // _net_log_error
 //
 // Logs the last network error to the console.  This is intended to be called

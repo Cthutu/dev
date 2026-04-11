@@ -77,6 +77,7 @@ typedef struct {
 
 Net_Socket net_socket(void);
 void       net_close(Net_Socket* sock);
+cstr       net_result_string(Net_Result result);
 
 Net_Result net_bind(Net_Socket* sock, cstr url);
 Net_Result net_connect(Net_Socket* sock, cstr url);
