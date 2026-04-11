@@ -13,6 +13,17 @@
 #include <unistd.h>
 
 //------------------------------------------------------------------------------
+// _net_tcp_transport_ops
+//
+// Transport operations for TCP sockets.
+//------------------------------------------------------------------------------
+
+internal const Net_TransportOps _net_tcp_transport_ops = {
+    .send         = _net_tcp_send,
+    .recv_message = _net_tcp_recv_message,
+};
+
+//------------------------------------------------------------------------------
 // _net_tcp_send_all
 //
 // Writes the full buffer to the TCP socket, retrying partial writes until the
@@ -207,6 +218,9 @@ Net_Result _net_tcp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
     sock->fd    = fd;
     sock->proto = NET_PROTO_TCP;
     sock->state = NET_STATE_WAITING_CONNECTION;
+    _net_socket_set_ops(sock,
+                        &_net_tcp_transport_ops,
+                        _net_socket_data_ensure(sock)->pattern_ops);
     return NET_OK;
 }
 
@@ -253,6 +267,9 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
     sock->fd    = fd;
     sock->proto = NET_PROTO_TCP;
     sock->state = NET_STATE_CONNECTED;
+    _net_socket_set_ops(sock,
+                        &_net_tcp_transport_ops,
+                        _net_socket_data_ensure(sock)->pattern_ops);
     return NET_OK;
 }
 
@@ -300,8 +317,9 @@ Net_Result _net_tcp_recv_message(Net_Socket* sock)
         return result;
     }
 
-    usize frame_len = (usize)ntohl(frame_len_n);
-    if (frame_len > NET_MAX_MESSAGE_SIZE) {
+    usize frame_len        = (usize)ntohl(frame_len_n);
+    usize max_message_size = _net_socket_data(sock)->max_message_size;
+    if (frame_len > max_message_size) {
         // Consume the full oversized frame so future receives remain aligned to
         // the next frame boundary.
         result = _net_tcp_discard_exact(sock, frame_len);
