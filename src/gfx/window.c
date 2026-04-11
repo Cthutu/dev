@@ -586,7 +586,7 @@ void fs_init(FrameSystem* fs)
 
     Display* display = XOpenDisplay(NULL);
     if (!display) {
-        kill("Failed to open X display");
+        fatal_error("Failed to open X display");
     }
     Window root_window = DefaultRootWindow(display);
 

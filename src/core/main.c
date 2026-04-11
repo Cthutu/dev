@@ -43,7 +43,7 @@ int main(int argc, char** argv)
 }
 #endif
 
-void kill(cstr format, ...)
+void fatal_error(cstr format, ...)
 {
     va_list args;
     va_start(args, format);

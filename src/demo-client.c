@@ -30,17 +30,18 @@ int run(int argc, char* argv[])
         Net_Result result =
             net_set_option(&sock, NET_OPT_CONNECT_TIMEOUT_MS, 2000);
         if (NET_FAILED(result)) {
-            kill("Failed to set connect timeout: %s",
-                 net_result_string(result));
+            fatal_error("Failed to set connect timeout: %s",
+                        net_result_string(result));
         }
         result = net_set_option(&sock, NET_OPT_RECONNECT_INTERVAL_MS, 25);
         if (NET_FAILED(result)) {
-            kill("Failed to set reconnect interval: %s",
-                 net_result_string(result));
+            fatal_error("Failed to set reconnect interval: %s",
+                        net_result_string(result));
         }
         result = net_connect(&sock, url);
         if (NET_FAILED(result)) {
-            kill("Failed to connect to server: %s", net_result_string(result));
+            fatal_error("Failed to connect to server: %s",
+                        net_result_string(result));
         }
 
         prn("Connected to %s (%d/10)", url, i + 1);
@@ -53,7 +54,7 @@ int run(int argc, char* argv[])
         net_message_done(&msg);
         net_close(&sock);
         if (NET_FAILED(result)) {
-            kill("Failed to send data: %s", net_result_string(result));
+            fatal_error("Failed to send data: %s", net_result_string(result));
         }
     }
 

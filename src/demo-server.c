@@ -18,7 +18,7 @@ int run(int argc, char* argv[])
     Net_Socket sock   = net_socket();
     Net_Result result = net_bind(&sock, url);
     if (NET_FAILED(result)) {
-        kill("Failed to create binding: %s", net_result_string(result));
+        fatal_error("Failed to create binding: %s", net_result_string(result));
     }
 
     prn("Bound to %s", url);
@@ -28,12 +28,13 @@ int run(int argc, char* argv[])
     for (int i = 0; i < 10; ++i) {
         result = net_recv(&msg);
         if (NET_FAILED(result)) {
-            kill("Failed to receive data: %s", net_result_string(result));
+            fatal_error("Failed to receive data: %s",
+                        net_result_string(result));
         }
 
         string text_msg;
         if (!net_message_read_string(&msg, &text_msg)) {
-            kill("Failed to read message");
+            fatal_error("Failed to read message");
         }
 
         prn("Received message %d/10: " STRINGP, i + 1, STRINGV(text_msg));

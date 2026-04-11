@@ -28,6 +28,8 @@ void* worker_thread(void* arg)
             channel_consume_string(&args->channel, msg);
         }
     }
+
+    return nullptr;
 }
 
 int run(int argc, char** argv)
@@ -45,7 +47,7 @@ int run(int argc, char** argv)
 
     Thread thread;
     if (!thread_create(&thread, worker_thread, &args)) {
-        kill("Failed to create worker thread");
+        fatal_error("Failed to create worker thread");
     }
 
     int count = 5000;

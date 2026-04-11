@@ -233,7 +233,7 @@ typedef const char* cstr; // Constant string type
 
 //------------------------------------------------------------------------------[Library]
 
-void kill(cstr format, ...);
+void fatal_error(cstr format, ...);
 
 //------------------------------------------------------------------------------[Memory]
 

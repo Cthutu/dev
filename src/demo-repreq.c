@@ -51,7 +51,7 @@ internal void* _demo_repreq_server(void* arg)
     u32    request_id = 0;
     if (!net_message_read_string(&msg, &request_text) ||
         !net_message_read_u32(&msg, &request_id)) {
-        kill("Reply socket failed to decode request");
+        fatal_error("Reply socket failed to decode request");
     }
 
     prn("Reply socket received request: " STRINGP " (%u)",
@@ -94,7 +94,7 @@ int run(int argc, char* argv[])
 
     Thread server_thread;
     if (!thread_create(&server_thread, _demo_repreq_server, &server)) {
-        kill("Failed to create reply thread");
+        fatal_error("Failed to create reply thread");
     }
 
     //
@@ -108,12 +108,14 @@ int run(int argc, char* argv[])
     Net_Result result =
         net_set_option(&client, NET_OPT_CONNECT_TIMEOUT_MS, 2000);
     if (NET_FAILED(result)) {
-        kill("Failed to set connect timeout: %s", net_result_string(result));
+        fatal_error("Failed to set connect timeout: %s",
+                    net_result_string(result));
     }
 
     result = net_set_option(&client, NET_OPT_RECONNECT_INTERVAL_MS, 25);
     if (NET_FAILED(result)) {
-        kill("Failed to set reconnect interval: %s", net_result_string(result));
+        fatal_error("Failed to set reconnect interval: %s",
+                    net_result_string(result));
     }
 
     //
@@ -122,7 +124,8 @@ int run(int argc, char* argv[])
 
     result = net_connect(&client, server.url);
     if (NET_FAILED(result)) {
-        kill("Request socket failed to connect: %s", net_result_string(result));
+        fatal_error("Request socket failed to connect: %s",
+                    net_result_string(result));
     }
 
     prn("Request socket connected to %s", server.url);
@@ -137,7 +140,8 @@ int run(int argc, char* argv[])
 
     result = net_send(&msg);
     if (NET_FAILED(result)) {
-        kill("Request socket failed to send: %s", net_result_string(result));
+        fatal_error("Request socket failed to send: %s",
+                    net_result_string(result));
     }
 
     prn("Request socket sent request");
@@ -148,15 +152,15 @@ int run(int argc, char* argv[])
 
     result = net_recv(&msg);
     if (NET_FAILED(result)) {
-        kill("Request socket failed to receive reply: %s",
-             net_result_string(result));
+        fatal_error("Request socket failed to receive reply: %s",
+                    net_result_string(result));
     }
 
     string reply_text;
     u32    reply_id = 0;
     if (!net_message_read_string(&msg, &reply_text) ||
         !net_message_read_u32(&msg, &reply_id)) {
-        kill("Request socket failed to decode reply");
+        fatal_error("Request socket failed to decode reply");
     }
 
     prn("Request socket received reply: " STRINGP " (%u)",
@@ -177,16 +181,16 @@ int run(int argc, char* argv[])
     //
 
     if (NET_FAILED(server.bind_result)) {
-        kill("Reply socket failed to bind: %s",
-             net_result_string(server.bind_result));
+        fatal_error("Reply socket failed to bind: %s",
+                    net_result_string(server.bind_result));
     }
     if (NET_FAILED(server.recv_result)) {
-        kill("Reply socket failed to receive: %s",
-             net_result_string(server.recv_result));
+        fatal_error("Reply socket failed to receive: %s",
+                    net_result_string(server.recv_result));
     }
     if (NET_FAILED(server.send_result)) {
-        kill("Reply socket failed to send: %s",
-             net_result_string(server.send_result));
+        fatal_error("Reply socket failed to send: %s",
+                    net_result_string(server.send_result));
     }
 
     prn("Request/reply demo complete.");
