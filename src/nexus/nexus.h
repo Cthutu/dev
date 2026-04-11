@@ -28,6 +28,7 @@
 // Macros
 
 #define NET_FAILED(result) ((result) != NET_OK)
+#define NET_MAX_MESSAGE_SIZE (1024 * 1024)
 
 //------------------------------------------------------------------------------
 // Types
@@ -44,8 +45,10 @@ typedef enum {
     NET_SOCKET_BUSY,   // The socket is already in use (e.g. trying to bind or
                        // connect a socket that's already connected or bound)
     NET_NOT_CONNECTED, // The socket is not ready for send/recv yet
-    NET_CLOSED,        // The peer closed the connection
-    NET_ERROR,         // A general error occurred - dev needs to investigate
+    NET_BUFFER_TOO_SMALL, // Receive buffer cannot hold the full pending message
+    NET_BAD_MESSAGE,      // The remote side sent an invalid message
+    NET_CLOSED,           // The peer closed the connection
+    NET_ERROR,            // A general error occurred - dev needs to investigate
 } Net_Result;
 
 typedef enum {
