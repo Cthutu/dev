@@ -29,14 +29,14 @@ typedef enum : u8 {
 } Net_Telnet_Parse_State;
 
 struct Net_TelnetState {
-    u8*   recv_buffer;
-    u8*   line_buffer;
-    usize recv_length;
-    usize recv_capacity;
-    usize line_length;
-    usize line_capacity;
-    u8    parse_state;
-    u8    negotiation_command;
+    u8*   recv_buffer;         // Raw bytes accumulated from the telnet stream
+    u8*   line_buffer;         // Current decoded line without CRLF
+    usize recv_length;         // Number of unread bytes in recv_buffer
+    usize recv_capacity;       // Allocated capacity for recv_buffer
+    usize line_length;         // Number of decoded line bytes ready so far
+    usize line_capacity;       // Allocated capacity for line_buffer
+    u8    parse_state;         // Current telnet parser state machine state
+    u8    negotiation_command; // Pending DO/DONT/WILL/WONT command byte
 };
 
 typedef enum : u8 {
@@ -45,74 +45,77 @@ typedef enum : u8 {
 } Net_Pipe_Kind;
 
 struct Net_Pipe {
-    Net_Pipe_Kind kind;
-    Net_Socket*   owner;
-    u32           id;
-    bool          closed;
+    Net_Pipe_Kind kind;   // Underlying flow kind: TCP or UDP peer
+    Net_Socket*   owner;  // Socket that owns this pipe
+    u32           id;     // Stable pipe id for the lifetime of this pipe
+    bool          closed; // True once the pipe has been closed locally
 
     union {
         struct {
-            int             fd;
-            Net_TelnetState telnet;
+            int             fd;     // Accepted TCP client file descriptor
+            Net_TelnetState telnet; // Telnet line parser for this TCP peer
         } tcp;
 
         struct {
-            struct sockaddr_in addr;
+            struct sockaddr_in addr; // Remembered UDP peer address
         } udp;
     };
 };
 
 typedef struct {
-    u64 connect_timeout_ms;
-    u64 reconnect_interval_ms;
-    u64 send_timeout_ms;
-    u64 recv_timeout_ms;
-    u64 nonblocking;
+    u64 connect_timeout_ms;    // Total wait budget for connect retries
+    u64 reconnect_interval_ms; // Delay between connect retry attempts
+    u64 send_timeout_ms;       // Send wait budget before timing out
+    u64 recv_timeout_ms;       // Receive wait budget before timing out
+    u64 nonblocking;           // Non-zero when operations should not wait
 } Net_SocketOptions;
 
 struct Net_SocketData {
-    Net_Socket_Kind         kind;
-    const Net_TransportOps* transport_ops;
-    const Net_PatternOps*   pattern_ops;
-    Net_SocketOptions       options;
-    Array(Net_Pipe*) pipes;
-    void*     pending_message;
-    Net_Pipe* pending_pipe;
-    usize     pending_message_len;
-    usize     pending_message_capacity;
-    usize     max_message_size;
-    u32       next_pipe_id;
-    bool      has_pending_message;
+    Net_Socket_Kind         kind;          // Runtime-checked socket kind
+    const Net_TransportOps* transport_ops; // Active transport behaviour
+    const Net_PatternOps*   pattern_ops;   // Active pattern behaviour
+    Net_SocketOptions       options;       // Configured per-socket options
+    Array(Net_Pipe*) pipes;                // Managed TCP/UDP reply paths
+    void*     pending_message;             // Retained full message payload
+    Net_Pipe* pending_pipe;             // Pipe associated with pending_message
+    usize     pending_message_len;      // Length of pending_message
+    usize     pending_message_capacity; // Allocated size of pending_message
+    usize     max_message_size;         // Maximum accepted/sent payload size
+    u32       next_pipe_id;             // Monotonic pipe id source
+    bool      has_pending_message;      // True when pending_message is valid
 };
 
 struct Net_ReqRepSocketData {
-    Net_SocketData base;
-    bool           send_next;
+    Net_SocketData base;      // Shared socket runtime header
+    bool           send_next; // True when the next req/rep operation must send
 };
 
 struct Net_TelnetSocketData {
-    Net_SocketData  base;
-    Net_TelnetState telnet;
+    Net_SocketData  base;   // Shared socket runtime header
+    Net_TelnetState telnet; // Connected-socket telnet parser state
 };
 
 struct Net_MessageData {
-    u8*       string_storage;
-    u8*       sender_url_storage;
-    Net_Pipe* pipe;
+    u8*       string_storage;     // Scratch storage for decoded strings
+    u8*       sender_url_storage; // Scratch storage for formatted sender URL
+    Net_Pipe* pipe;               // Hidden reply route attached by receive
 };
 
 struct Net_TransportOps {
-    Net_Result (*send)(Net_Socket* sock, const void* buffer, usize len);
-    Net_Result (*recv_message)(Net_Socket* sock);
+    Net_Result (*send)(Net_Socket* sock,
+                       const void* buffer,
+                       usize       len);                // Transport-level send
+    Net_Result (*recv_message)(Net_Socket* sock); // Transport-level receive
 };
 
 struct Net_PatternOps {
-    Net_Result (*send)(Net_Message* msg);
-    Net_Result (*recv)(Net_Socket* sock,
-                       void*       buffer,
-                       usize       len,
-                       usize*      out_recv_len,
-                       Net_Pipe**  out_pipe);
+    Net_Result (*send)(Net_Message* msg); // Pattern-aware send entry point
+    Net_Result (*recv)(
+        Net_Socket* sock,
+        void*       buffer,
+        usize       len,
+        usize*      out_recv_len,
+        Net_Pipe**  out_pipe); // Pattern-aware receive entry point
 };
 
 //------------------------------------------------------------------------------

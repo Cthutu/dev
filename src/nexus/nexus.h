@@ -85,32 +85,32 @@ typedef enum {
 } Net_Option;
 
 typedef struct {
-    Net_State       state;
-    int             fd; // Socket file descriptor
-    Net_Protocol    proto;
-    Net_Socket_Kind kind;
+    Net_State       state; // Current connection/listener lifecycle state
+    int             fd;    // Live OS socket handle, or -1 when unused
+    Net_Protocol    proto; // Active transport selected by bind/connect
+    Net_Socket_Kind kind;  // Public socket behaviour kind
 
     // Private implementation state. Callers should treat these fields as
     // unstable and avoid depending on them directly.
-    void* internal_data;
+    void* internal_data; // Private Nexus runtime block
 } Net_Socket;
 
 typedef struct {
-    u8           ip[16]; // IPv6 address (or IPv4-mapped IPv6)
-    string       host;
-    u16          port;
-    Net_Protocol proto;
+    u8           ip[16]; // Parsed IPv4 bytes stored in IPv6-sized space
+    string       host;   // Host slice from the original URL
+    u16          port;   // Parsed port number
+    Net_Protocol proto;  // Parsed URL protocol
 } Net_Endpoint;
 
 typedef struct {
-    Net_Socket* socket;
-    u8*         data;
-    usize       length;
-    usize       capacity;
+    Net_Socket* socket;   // Owning socket used for send/receive
+    u8*         data;     // Reusable payload buffer
+    usize       length;   // Current payload length in bytes
+    usize       capacity; // Allocated payload capacity in bytes
 
     // Private implementation state. Callers should treat these fields as
     // unstable and avoid depending on them directly.
-    void* internal_data;
+    void* internal_data; // Private message metadata and routing state
 } Net_Message;
 
 //------------------------------------------------------------------------------
