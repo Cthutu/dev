@@ -94,6 +94,8 @@ Net_Socket net_socket(void)
 
 void net_close(Net_Socket* sock)
 {
+    _net_socket_close_pipes(sock);
+
     if (sock->fd >= 0) {
         close(sock->fd);
         sock->fd = -1;
@@ -225,6 +227,7 @@ void _net_socket_clear_pending(Net_Socket* sock)
     data->pending_message_len      = 0;
     data->pending_message_capacity = 0;
     data->has_pending_message      = false;
+    data->pending_pipe             = NULL;
 }
 
 //------------------------------------------------------------------------------
@@ -234,7 +237,10 @@ void _net_socket_clear_pending(Net_Socket* sock)
 // `net_recv` calls can consume, retry, or drop it.
 //------------------------------------------------------------------------------
 
-void _net_socket_store_pending(Net_Socket* sock, const void* buffer, usize len)
+void _net_socket_store_pending(Net_Socket* sock,
+                               const void* buffer,
+                               usize       len,
+                               Net_Pipe*   pipe)
 {
     Net_SocketData* data = _net_socket_data_ensure(sock);
 
@@ -252,6 +258,7 @@ void _net_socket_store_pending(Net_Socket* sock, const void* buffer, usize len)
 
     data->pending_message_len = len;
     data->has_pending_message = true;
+    data->pending_pipe        = pipe;
 }
 
 //------------------------------------------------------------------------------
@@ -282,6 +289,7 @@ Net_Result _net_socket_consume_pending(Net_Socket* sock,
         // A null buffer is the explicit "drop this pending message" signal.
         data->has_pending_message = false;
         data->pending_message_len = 0;
+        data->pending_pipe        = NULL;
         return NET_OK;
     }
 
@@ -295,6 +303,7 @@ Net_Result _net_socket_consume_pending(Net_Socket* sock,
 
     data->has_pending_message = false;
     data->pending_message_len = 0;
+    data->pending_pipe        = NULL;
     return NET_OK;
 }
 

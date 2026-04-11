@@ -23,6 +23,34 @@ internal const Net_TransportOps _net_udp_transport_ops = {
 };
 
 //------------------------------------------------------------------------------
+// _net_udp_send_to_addr
+//
+// Sends one UDP datagram to the provided destination address.
+//------------------------------------------------------------------------------
+
+Net_Result _net_udp_send_to_addr(int                       fd,
+                                 const struct sockaddr_in* addr,
+                                 const void*               buffer,
+                                 usize                     len)
+{
+    ssize_t sent =
+        sendto(fd, buffer, len, 0, (const struct sockaddr*)addr, sizeof(*addr));
+    if (sent < 0) {
+        _net_log_error();
+        switch (errno) {
+        case ENETDOWN:
+            return NET_NO_NETWORK;
+        case ECONNRESET:
+            return NET_CLOSED;
+        default:
+            return NET_ERROR;
+        }
+    }
+
+    return (usize)sent == len ? NET_OK : NET_ERROR;
+}
+
+//------------------------------------------------------------------------------
 // _net_udp_bind
 //
 // Creates and binds a UDP socket. Because UDP is connectionless, a bound socket
@@ -157,7 +185,14 @@ Net_Result _net_udp_send(Net_Socket* sock, const void* buffer, usize len)
 
 Net_Result _net_udp_recv_message(Net_Socket* sock)
 {
-    ssize_t packet_len = recv(sock->fd, NULL, 0, MSG_PEEK | MSG_TRUNC);
+    struct sockaddr_in route_addr;
+    socklen_t          route_addr_len = sizeof(route_addr);
+    ssize_t            packet_len     = recvfrom(sock->fd,
+                                  NULL,
+                                  0,
+                                  MSG_PEEK | MSG_TRUNC,
+                                  (struct sockaddr*)&route_addr,
+                                  &route_addr_len);
     if (packet_len < 0) {
         _net_log_error();
         switch (errno) {
@@ -176,9 +211,16 @@ Net_Result _net_udp_recv_message(Net_Socket* sock)
         return NET_BAD_MESSAGE;
     }
 
+    Net_Pipe* pipe = _net_pipe_find_or_create_udp(sock, &route_addr);
+
     if (packet_len == 0) {
-        recv(sock->fd, NULL, 0, 0);
-        _net_socket_store_pending(sock, NULL, 0);
+        recvfrom(sock->fd,
+                 NULL,
+                 0,
+                 0,
+                 (struct sockaddr*)&route_addr,
+                 &route_addr_len);
+        _net_socket_store_pending(sock, NULL, 0, pipe);
         return NET_OK;
     }
 
@@ -186,7 +228,12 @@ Net_Result _net_udp_recv_message(Net_Socket* sock)
     // complete message to retain for the public receive API.
     void* packet_buffer =
         mem_realloc(NULL, (usize)packet_len, __FILE__, __LINE__);
-    ssize_t recv_len = recv(sock->fd, packet_buffer, (usize)packet_len, 0);
+    ssize_t recv_len = recvfrom(sock->fd,
+                                packet_buffer,
+                                (usize)packet_len,
+                                0,
+                                (struct sockaddr*)&route_addr,
+                                &route_addr_len);
     if (recv_len < 0) {
         mem_free(packet_buffer, __FILE__, __LINE__);
         _net_log_error();
@@ -198,7 +245,7 @@ Net_Result _net_udp_recv_message(Net_Socket* sock)
         }
     }
 
-    _net_socket_store_pending(sock, packet_buffer, (usize)recv_len);
+    _net_socket_store_pending(sock, packet_buffer, (usize)recv_len, pipe);
     mem_free(packet_buffer, __FILE__, __LINE__);
     return NET_OK;
 }

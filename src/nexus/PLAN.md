@@ -251,7 +251,7 @@ should be maintained.
 - pattern kind
 - framing scratch state
 - max message size
-- future peer/session metadata
+- future peer/pipe metadata
 
 The public struct can remain exposed for now if needed, but long term it would
 be cleaner to hide implementation details behind an opaque type.
@@ -262,7 +262,6 @@ After TCP framing is stable, add higher-level socket constructors.
 
 Initial candidates:
 
-- `net_message_socket`
 - `net_request_socket`
 - `net_reply_socket`
 - `net_telnet_socket`
@@ -271,7 +270,7 @@ Planned behaviour:
 
 - request/reply constrains send/recv ordering
 - telnet uses stream-oriented text behaviour instead of framed binary messages
-- raw message sockets use:
+- basic sockets use:
   - TCP with framing
   - UDP with datagrams
 
@@ -297,49 +296,68 @@ Even if the public API stays simple, the implementation should distinguish:
 - listener:
   - owns the bound TCP port
   - accepts new clients
-- session:
-  - represents one active TCP client connection
-  - owns framing state for that connection
-- peer:
-  - identifies a remote sender for reply purposes
-  - for UDP this is address-based
-  - for TCP this is session-based
+- pipe:
+  - represents one replyable communication path
+  - for TCP this is one accepted client connection
+  - for UDP this is one remembered peer address on a bound socket
 
 This separation is useful for both transport types:
 
-- TCP multi-client servers need many sessions under one listener
-- UDP multi-peer servers need one bound socket plus many peer identities
+- TCP multi-client servers need many pipes under one listener
+- UDP multi-peer servers need one bound socket plus many remembered peer pipes
+
+Revised direction:
+
+- use one internal concept, `Net_Pipe`, for any replyable communication path
+- for TCP, a pipe represents one accepted client connection
+- for UDP, a pipe represents one remembered peer address on a socket
+
+This keeps reply routing unified across transports and avoids introducing a
+separate route abstraction when the real concept is "a path where data can flow
+back to the sender".
 
 ### Recommended internal model
 
 Introduce hidden internal records instead of overloading `Net_Socket` with every
 role at once.
 
-Possible shape:
+Preferred shape:
 
 ```c
-typedef struct Net_Session {
-    int    fd;
-    u32    id;
-    usize  pending_message_size;
-    bool   connected;
-} Net_Session;
+typedef enum : u8 {
+    NET_PIPE_TCP,
+    NET_PIPE_UDP,
+} Net_Pipe_Kind;
 
-typedef struct Net_Peer {
-    Net_Protocol proto;
-    u32          session_id;   // TCP
-    sockaddr_in  addr;         // UDP
-    bool         valid;
-} Net_Peer;
+typedef struct Net_Pipe {
+    Net_Pipe_Kind kind;
+    Net_Socket*   owner;
+    u32           id;
+    bool          closed;
+
+    union {
+        struct {
+            int fd;
+        } tcp;
+
+        struct {
+            sockaddr_in addr;
+        } udp;
+    };
+} Net_Pipe;
 ```
 
-The exact fields can change. The important part is the conceptual split.
+The exact fields can change. The important part is:
+
+- `Net_Socket` remains the public endpoint handle
+- `Net_Pipe` becomes the internal per-flow reply path
+- `Net_Message` can carry a hidden `Net_Pipe*`
 
 ### API shape options
 
 There are three realistic directions.
 
-#### Option 1: Explicit sessions
+#### Option 1: Explicit accepted clients
 
 This is the clearest low-level shape.
 
@@ -380,10 +398,10 @@ net_message_append(&msg, reply.data, reply.count);
 net_send_msg(&server, &msg);
 ```
 
-Internally, the message identifies where it came from:
+Internally, the message identifies where it came from via one pipe:
 
-- TCP: a server-managed session
-- UDP: source address/port
+- TCP: a server-managed accepted pipe
+- UDP: a pseudo-pipe that remembers the source address
 
 That reply context does not need to be passed as a separate public parameter if
 it is stored inside the message object itself.
@@ -418,7 +436,7 @@ net_reply(&sock, &req, reply.data, reply.count);
 Pros:
 
 - strongest alignment with nanomsg-style patterns
-- caller does not manage sessions directly
+- caller does not manage accepted clients directly
 - natural request/reply flow
 
 Cons:
@@ -443,28 +461,27 @@ This keeps demos and framing work simple.
 
 #### Internal preparation
 
-While implementing TCP framing, add hidden session-aware structure so the code
-does not assume "one bound TCP socket becomes one client forever" as a permanent
-design.
+While implementing TCP multi-client support, add hidden pipe-aware structure so
+the code does not assume "one bound TCP socket becomes one client forever" as a
+permanent design.
 
 That means:
 
 - do not rely on `Net_Socket` alone as the future server model
-- keep room for listener/session split internally
-- keep peer identity as a first-class future concept
+- keep room for listener/pipe split internally
+- keep per-message pipe identity as a first-class future concept
 
 #### Medium term
 
-Add a server-side message-envelope API.
-
-Suggested future primitives:
+Build multi-client transport support on top of the existing message-envelope
+API:
 
 - `net_recv_msg`
 - `net_message_append`
 - `net_send_msg`
-- `net_peer_equal`
+- optional future pipe inspection helpers if needed
 
-These primitives can support:
+These primitives already support and should be extended to handle:
 
 - multi-client TCP servers
 - multi-peer UDP servers
@@ -528,7 +545,7 @@ The transport layer needs stable, reusable state for:
 - partial TCP frame reads
 - partial TCP frame writes
 - per-socket scratch buffers
-- per-session framing progress
+- per-pipe framing progress
 
 Those are usually better handled with explicit owned buffers and counters than
 with arena-only allocation.
@@ -541,7 +558,7 @@ Prefer fixed or reusable owned storage:
 
 - heap-backed buffers when size is not known at compile time
 - dynamic arrays when a resizable buffer is genuinely useful
-- explicit per-socket/per-session scratch state in internal structs
+- explicit per-socket/per-pipe scratch state in internal structs
 
 This is the right place for:
 
@@ -569,7 +586,7 @@ This is especially useful when the lifetime is scope-shaped:
 
 Prefer heap allocation or dynamic arrays for structures such as:
 
-- session tables
+- pipe tables
 - peer maps
 - listener-owned client lists
 - transport/pattern runtime objects
@@ -594,7 +611,7 @@ For future higher-level APIs:
 ## Message Object Direction
 
 The preferred long-term server-side abstraction is now a reusable message
-object.
+object carrying hidden pipe context.
 
 ### Public behaviour
 
@@ -608,6 +625,7 @@ A future `Net_Message` should provide:
 - append support
 - destructive read support
 - reuse across receive and send
+- hidden pipe association for replies
 
 For now, only a body is required publicly. Head/body segmentation can be added
 later if it proves useful.
@@ -641,7 +659,7 @@ context.
 That supports:
 
 - sending through the correct socket family
-- retaining reply/session/source metadata internally
+- retaining reply pipe metadata internally
 - future pattern-specific validation
 
 ### Receive/send lifecycle
@@ -669,15 +687,151 @@ remove hidden routing context.
 
 ### Hidden reply context
 
-The message object should carry hidden routing metadata internally.
+The message object should carry hidden pipe metadata internally.
 
 That means:
 
-- TCP messages can remember which session they came from
-- UDP messages can remember which source address they came from
+- TCP messages can remember which accepted pipe they came from
+- UDP messages can remember which pseudo-pipe they came from
 
 This preserves the simple public API while still allowing multi-client and
 multi-peer reply semantics later.
+
+## Phase 4: Unified Pipe Model For Multi-Client TCP
+
+### Scope
+
+Add one internal concept, `Net_Pipe`, for any replyable flow of data:
+
+- TCP accepted clients become TCP pipes
+- UDP senders become UDP pseudo-pipes
+
+This keeps the public API message-oriented while giving the runtime a real
+representation for where a message came from.
+
+### Why this is needed
+
+The current implementation is enough for:
+
+- single-peer TCP
+- multi-peer UDP replies via hidden message metadata
+
+It is not enough for a bound TCP socket to talk to multiple clients, because
+the socket still cannot remain a listener and also represent many active client
+streams at once.
+
+### Core runtime model
+
+The internal model should become:
+
+- `Net_Socket`
+  - public endpoint handle
+  - owns the listening socket or default connected socket
+  - owns any server-side TCP pipe table
+- `Net_Pipe`
+  - one replyable communication path
+  - TCP pipe: one accepted client file descriptor plus framing state
+  - UDP pipe: one remembered sender address associated with a bound socket
+- `Net_Message`
+  - payload plus hidden `Net_Pipe*`
+
+This deliberately replaces a separate route abstraction. The real reusable
+concept is a path where data can flow back to the sender.
+
+### Proposed internal shape
+
+Exact fields can change, but the direction should look like:
+
+```c
+typedef enum : u8 {
+    NET_PIPE_TCP,
+    NET_PIPE_UDP,
+} Net_Pipe_Kind;
+
+typedef struct Net_Pipe {
+    Net_Pipe_Kind kind;
+    Net_Socket*   owner;
+    u32           id;
+    bool          closed;
+
+    union {
+        struct {
+            int fd;
+        } tcp;
+
+        struct {
+            sockaddr_in addr;
+        } udp;
+    };
+} Net_Pipe;
+```
+
+The first TCP version will likely need more fields than this for framed receive
+progress and any pending message state. That is expected.
+
+### Message behaviour with pipes
+
+Messages should carry hidden `Net_Pipe*` metadata internally.
+
+That means:
+
+- `net_recv_msg` on a TCP server can attach the originating accepted pipe
+- `net_recv_msg` on a UDP socket can attach the remembered sender pipe
+- `net_send_msg` can reply via that pipe without any explicit peer parameter
+
+`net_message_clear` should continue to preserve this hidden pipe association so
+the same message object can be reused for replies.
+
+### TCP server behaviour
+
+For a bound TCP socket:
+
+- the listening file descriptor remains a listener
+- accepted clients become managed TCP pipes
+- each pipe owns its own framing progress and closure state
+- receive logic finds one complete framed message from one pipe
+- the received `Net_Message` remembers which pipe it came from
+
+This removes the current temporary behaviour where the first receive mutates a
+listener into a single connected client.
+
+### UDP behaviour
+
+For a bound UDP socket:
+
+- a sender can be represented by a UDP pseudo-pipe
+- the pseudo-pipe remembers the sender address
+- `net_send_msg` can reply via that stored address
+
+This unifies TCP and UDP reply semantics around the same hidden message
+metadata.
+
+### Polling and readiness
+
+The first practical TCP multi-client implementation should use a readiness API
+such as `poll()` for the listener and all active TCP pipes.
+
+That gives one synchronous server-side receive flow:
+
+- accept any pending clients
+- wait for readability
+- read one framed message from one ready pipe
+- attach that pipe to the message
+
+This remains compatible with the current synchronous design and does not
+require background threads.
+
+### Testing expectations
+
+This phase should include tests proving that:
+
+- one TCP server socket can receive from multiple connected clients
+- replies sent via `net_send_msg` go back to the correct originating TCP pipe
+- UDP pseudo-pipe behaviour still works
+- pipe closure and removal behave correctly
+
+The demos can remain simple while the tests exercise the multi-client server
+behaviour.
 
 ### Summary
 
@@ -735,7 +889,10 @@ These have now been resolved for the first implementation:
 5. First real multi-client server direction:
    - message envelopes
    - reusable message objects with append support
-   - hidden reply context carried inside the message object
+   - hidden `Net_Pipe` context carried inside the message object
+6. Internal multi-client transport model:
+   - one `Net_Pipe` abstraction for TCP accepted clients and UDP remembered
+     peers
 
 ## Recommended Answers
 

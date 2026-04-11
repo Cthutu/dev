@@ -7,6 +7,7 @@
 #include <nexus/internal.h>
 
 #include <arpa/inet.h>
+#include <sys/socket.h>
 
 //------------------------------------------------------------------------------
 // _net_hton_u64
@@ -38,6 +39,51 @@ internal u64 _net_ntoh_u64(u64 value)
 #else
     return value;
 #endif
+}
+
+//------------------------------------------------------------------------------
+// _net_message_data_ensure
+//
+// Creates the private runtime block for a message on first use.
+//------------------------------------------------------------------------------
+
+internal Net_MessageData* _net_message_data_ensure(Net_Message* msg)
+{
+    Net_MessageData* data = msg->internal_data;
+    if (!data) {
+        data  = mem_realloc(NULL, sizeof(*data), __FILE__, __LINE__);
+        *data = (Net_MessageData){0};
+        msg->internal_data = data;
+    }
+    return data;
+}
+
+//------------------------------------------------------------------------------
+// _net_message_clear_pipe
+//
+// Clears any hidden pipe context retained by the message.
+//------------------------------------------------------------------------------
+
+internal void _net_message_clear_pipe(Net_Message* msg)
+{
+    Net_MessageData* data = msg->internal_data;
+    if (!data) {
+        return;
+    }
+
+    data->pipe = NULL;
+}
+
+//------------------------------------------------------------------------------
+// _net_message_set_route
+//
+// Stores hidden pipe metadata inside the message runtime block.
+//------------------------------------------------------------------------------
+
+internal void _net_message_set_pipe(Net_Message* msg, Net_Pipe* pipe)
+{
+    Net_MessageData* data = _net_message_data_ensure(msg);
+    data->pipe            = pipe;
 }
 
 //------------------------------------------------------------------------------
@@ -79,7 +125,12 @@ Net_Message net_message_create(Net_Socket* sock)
 
 void net_message_done(Net_Message* msg)
 {
-    if (msg->internal_data) {
+    Net_MessageData* data = msg->internal_data;
+    if (data && data->string_storage) {
+        data->string_storage =
+            mem_free(data->string_storage, __FILE__, __LINE__);
+    }
+    if (data) {
         msg->internal_data = mem_free(msg->internal_data, __FILE__, __LINE__);
     }
     if (msg->data) {
@@ -220,7 +271,8 @@ bool net_message_read_u8(Net_Message* msg, u8* out_value)
 
 bool net_message_read_string(Net_Message* msg, string* out_value)
 {
-    u32 length = 0;
+    Net_MessageData* data   = _net_message_data_ensure(msg);
+    u32              length = 0;
     if (!net_message_read_u32(msg, &length)) {
         return false;
     }
@@ -229,21 +281,18 @@ bool net_message_read_string(Net_Message* msg, string* out_value)
         return false;
     }
 
-    u8* string_data = NULL;
     if (length > 0) {
-        string_data = mem_realloc(NULL, length, __FILE__, __LINE__);
-        if (!net_message_read(msg, string_data, length)) {
-            string_data = mem_free(string_data, __FILE__, __LINE__);
+        data->string_storage =
+            mem_realloc(data->string_storage, length, __FILE__, __LINE__);
+        if (!net_message_read(msg, data->string_storage, length)) {
             return false;
         }
+    } else if (data->string_storage) {
+        data->string_storage =
+            mem_free(data->string_storage, __FILE__, __LINE__);
     }
 
-    if (msg->internal_data) {
-        msg->internal_data = mem_free(msg->internal_data, __FILE__, __LINE__);
-    }
-
-    msg->internal_data = string_data;
-    *out_value         = string_from(string_data, length);
+    *out_value = string_from(data->string_storage, length);
     return true;
 }
 
@@ -310,6 +359,12 @@ Net_Result net_send_msg(Net_Message* msg)
         return NET_NOT_CONNECTED;
     }
 
+    Net_MessageData* data = msg->internal_data;
+    if (data && data->pipe) {
+        // Reply via the originating pipe when the message carries one.
+        return _net_pipe_send(data->pipe, msg->data, msg->length);
+    }
+
     return net_send(msg->socket, msg->data, msg->length);
 }
 
@@ -325,14 +380,34 @@ Net_Result net_recv_msg(Net_Message* msg)
         return NET_NOT_CONNECTED;
     }
 
+    Net_SocketData* socket_data = _net_socket_data(msg->socket);
     if (msg->capacity == 0) {
         _net_message_ensure_capacity(msg, 1);
     }
 
+    if (!socket_data || !socket_data->transport_ops ||
+        !socket_data->transport_ops->recv_message) {
+        return NET_NOT_CONNECTED;
+    }
+
     while (true) {
+        if (!socket_data->has_pending_message) {
+            Net_Result result =
+                socket_data->transport_ops->recv_message(msg->socket);
+            if (NET_FAILED(result)) {
+                return result;
+            }
+        }
+
+        if (socket_data->pending_pipe) {
+            _net_message_set_pipe(msg, socket_data->pending_pipe);
+        } else {
+            _net_message_clear_pipe(msg);
+        }
+
         usize      recv_len = 0;
-        Net_Result result =
-            net_recv(msg->socket, msg->data, msg->capacity, &recv_len);
+        Net_Result result   = _net_socket_consume_pending(
+            msg->socket, msg->data, msg->capacity, &recv_len);
         if (result == NET_BUFFER_TOO_SMALL) {
             _net_message_ensure_capacity(msg, recv_len == 0 ? 1 : recv_len);
             continue;

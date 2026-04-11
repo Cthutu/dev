@@ -20,6 +20,35 @@ typedef struct {
     usize      received_tail_len;
 } MessageServerArgs;
 
+typedef struct {
+    char       url[64];
+    Net_Result bind_result;
+    Net_Result recv_result;
+    Net_Result send_result;
+    string     received_string;
+} UdpMessageServerArgs;
+
+typedef struct {
+    char       url[64];
+    string     request_text;
+    u32        request_id;
+    Net_Result connect_result;
+    Net_Result send_result;
+    Net_Result recv_result;
+    char       reply_text_storage[32];
+    usize      reply_text_len;
+    u32        reply_id;
+} MultiClientArgs;
+
+typedef struct {
+    char       url[64];
+    Net_Result bind_result;
+    Net_Result recv_results[2];
+    Net_Result send_results[2];
+    string     received_texts[2];
+    u32        received_ids[2];
+} MultiClientServerArgs;
+
 internal void _nexus_message_wait_for_server_start(void)
 {
     thread_sleep_ms(50);
@@ -33,6 +62,18 @@ internal void _nexus_make_message_test_url(char* out_url, usize out_url_size)
     snprintf(out_url,
              out_url_size,
              "tcp://127.0.0.1:%u",
+             (unsigned)(next_port + (u16)(getpid() % 1000) * 10));
+}
+
+internal void _nexus_make_udp_message_test_url(char* out_url,
+                                               usize out_url_size)
+{
+    static u16 next_port = 19180;
+
+    next_port++;
+    snprintf(out_url,
+             out_url_size,
+             "udp://127.0.0.1:%u",
              (unsigned)(next_port + (u16)(getpid() % 1000) * 10));
 }
 
@@ -73,6 +114,107 @@ internal void* _nexus_message_server_round_trip(void* arg)
     args->send_result = net_send_msg(&msg);
 
     net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
+internal void* _nexus_udp_message_server_round_trip(void* arg)
+{
+    UdpMessageServerArgs* args = arg;
+
+    Net_Socket sock            = net_socket();
+    args->bind_result          = net_bind(&sock, args->url);
+    if (NET_FAILED(args->bind_result)) {
+        return NULL;
+    }
+
+    Net_Message msg   = net_message_create(&sock);
+    args->recv_result = net_recv_msg(&msg);
+    if (NET_FAILED(args->recv_result)) {
+        net_message_done(&msg);
+        net_close(&sock);
+        return NULL;
+    }
+
+    TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
+
+    net_message_clear(&msg);
+    net_message_append_string(&msg, S("udp-reply"));
+    args->send_result = net_send_msg(&msg);
+
+    net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
+internal void* _nexus_multi_client_server_round_trip(void* arg)
+{
+    MultiClientServerArgs* args = arg;
+
+    Net_Socket sock             = net_socket();
+    args->bind_result           = net_bind(&sock, args->url);
+    if (NET_FAILED(args->bind_result)) {
+        return NULL;
+    }
+
+    Net_Message msg = net_message_create(&sock);
+    for (usize i = 0; i < 2; ++i) {
+        args->recv_results[i] = net_recv_msg(&msg);
+        if (NET_FAILED(args->recv_results[i])) {
+            break;
+        }
+
+        TEST_ASSERT(net_message_read_string(&msg, &args->received_texts[i]));
+        TEST_ASSERT(net_message_read_u32(&msg, &args->received_ids[i]));
+
+        net_message_clear(&msg);
+        net_message_append_string(&msg, args->received_texts[i]);
+        net_message_append_u32(&msg, args->received_ids[i]);
+        args->send_results[i] = net_send_msg(&msg);
+        if (NET_FAILED(args->send_results[i])) {
+            break;
+        }
+    }
+
+    net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
+internal void* _nexus_multi_client_round_trip(void* arg)
+{
+    MultiClientArgs* args = arg;
+
+    Net_Socket sock       = net_socket();
+    args->connect_result  = net_connect(&sock, args->url);
+    if (NET_FAILED(args->connect_result)) {
+        return NULL;
+    }
+
+    Net_Message outbound = net_message_create(&sock);
+    net_message_append_string(&outbound, args->request_text);
+    net_message_append_u32(&outbound, args->request_id);
+    args->send_result = net_send_msg(&outbound);
+    if (NET_FAILED(args->send_result)) {
+        net_message_done(&outbound);
+        net_close(&sock);
+        return NULL;
+    }
+
+    Net_Message inbound = net_message_create(&sock);
+    args->recv_result   = net_recv_msg(&inbound);
+    if (args->recv_result == NET_OK) {
+        string reply_text;
+        TEST_ASSERT(net_message_read_string(&inbound, &reply_text));
+        TEST_ASSERT(net_message_read_u32(&inbound, &args->reply_id));
+        TEST_ASSERT_LT(reply_text.count, sizeof(args->reply_text_storage));
+        memcpy(args->reply_text_storage, reply_text.data, reply_text.count);
+        args->reply_text_storage[reply_text.count] = 0;
+        args->reply_text_len                       = reply_text.count;
+    }
+
+    net_message_done(&outbound);
+    net_message_done(&inbound);
     net_close(&sock);
     return NULL;
 }
@@ -170,4 +312,102 @@ TEST_CASE(nexus, recv_msg_and_send_msg_round_trip)
     net_message_done(&outbound);
     net_message_done(&inbound);
     net_close(&client_sock);
+}
+
+TEST_CASE(nexus, udp_recv_msg_preserves_reply_route_for_send_msg)
+{
+    UdpMessageServerArgs args = {0};
+    _nexus_make_udp_message_test_url(args.url, sizeof(args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_udp_message_server_round_trip, &args));
+
+    _nexus_message_wait_for_server_start();
+
+    Net_Socket client_sock = net_socket();
+    TEST_ASSERT_EQ(net_connect(&client_sock, args.url), NET_OK);
+
+    Net_Message outbound = net_message_create(&client_sock);
+    net_message_append_string(&outbound, S("udp-request"));
+    TEST_ASSERT_EQ(net_send_msg(&outbound), NET_OK);
+
+    Net_Message inbound = net_message_create(&client_sock);
+    TEST_ASSERT_EQ(net_recv_msg(&inbound), NET_OK);
+
+    string reply_text;
+    TEST_ASSERT(net_message_read_string(&inbound, &reply_text));
+
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_OK);
+    TEST_ASSERT_EQ(args.send_result, NET_OK);
+    TEST_ASSERT_EQ(args.received_string.count, (usize)11);
+    TEST_ASSERT_MEM_EQ(args.received_string.data, "udp-request", 11);
+    TEST_ASSERT_EQ(reply_text.count, (usize)9);
+    TEST_ASSERT_MEM_EQ(reply_text.data, "udp-reply", 9);
+
+    net_message_done(&outbound);
+    net_message_done(&inbound);
+    net_close(&client_sock);
+}
+
+TEST_CASE(nexus, tcp_server_can_reply_to_multiple_clients_via_message_pipe)
+{
+    MultiClientServerArgs server_args = {0};
+    _nexus_make_message_test_url(server_args.url, sizeof(server_args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_multi_client_server_round_trip, &server_args));
+
+    _nexus_message_wait_for_server_start();
+
+    MultiClientArgs client_a = {
+        .request_text = S("client-a"),
+        .request_id   = 101,
+    };
+    MultiClientArgs client_b = {
+        .request_text = S("client-b"),
+        .request_id   = 202,
+    };
+
+    snprintf(client_a.url, sizeof(client_a.url), "%s", server_args.url);
+    snprintf(client_b.url, sizeof(client_b.url), "%s", server_args.url);
+
+    Thread client_thread_a;
+    Thread client_thread_b;
+    TEST_ASSERT(thread_create(
+        &client_thread_a, _nexus_multi_client_round_trip, &client_a));
+    TEST_ASSERT(thread_create(
+        &client_thread_b, _nexus_multi_client_round_trip, &client_b));
+
+    thread_join(&client_thread_a);
+    thread_join(&client_thread_b);
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_results[0], NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_results[1], NET_OK);
+    TEST_ASSERT_EQ(server_args.send_results[0], NET_OK);
+    TEST_ASSERT_EQ(server_args.send_results[1], NET_OK);
+
+    TEST_ASSERT_EQ(client_a.connect_result, NET_OK);
+    TEST_ASSERT_EQ(client_a.send_result, NET_OK);
+    TEST_ASSERT_EQ(client_a.recv_result, NET_OK);
+    TEST_ASSERT_EQ(client_a.reply_text_len, client_a.request_text.count);
+    TEST_ASSERT_MEM_EQ(client_a.reply_text_storage,
+                       client_a.request_text.data,
+                       client_a.request_text.count);
+    TEST_ASSERT_EQ(client_a.reply_id, client_a.request_id);
+
+    TEST_ASSERT_EQ(client_b.connect_result, NET_OK);
+    TEST_ASSERT_EQ(client_b.send_result, NET_OK);
+    TEST_ASSERT_EQ(client_b.recv_result, NET_OK);
+    TEST_ASSERT_EQ(client_b.reply_text_len, client_b.request_text.count);
+    TEST_ASSERT_MEM_EQ(client_b.reply_text_storage,
+                       client_b.request_text.data,
+                       client_b.request_text.count);
+    TEST_ASSERT_EQ(client_b.reply_id, client_b.request_id);
 }
