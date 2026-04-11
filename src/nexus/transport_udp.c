@@ -12,6 +12,17 @@
 #include <unistd.h>
 
 //------------------------------------------------------------------------------
+// _net_udp_transport_ops
+//
+// Transport operations for UDP sockets.
+//------------------------------------------------------------------------------
+
+internal const Net_TransportOps _net_udp_transport_ops = {
+    .send         = _net_udp_send,
+    .recv_message = _net_udp_recv_message,
+};
+
+//------------------------------------------------------------------------------
 // _net_udp_bind
 //
 // Creates and binds a UDP socket. Because UDP is connectionless, a bound socket
@@ -57,6 +68,9 @@ Net_Result _net_udp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
     sock->fd    = fd;
     sock->proto = NET_PROTO_UDP;
     sock->state = NET_STATE_CONNECTED;
+    _net_socket_set_ops(sock,
+                        &_net_udp_transport_ops,
+                        _net_socket_data_ensure(sock)->pattern_ops);
     return NET_OK;
 }
 
@@ -104,6 +118,9 @@ Net_Result _net_udp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
     sock->fd    = fd;
     sock->proto = NET_PROTO_UDP;
     sock->state = NET_STATE_CONNECTED;
+    _net_socket_set_ops(sock,
+                        &_net_udp_transport_ops,
+                        _net_socket_data_ensure(sock)->pattern_ops);
     return NET_OK;
 }
 
@@ -151,7 +168,8 @@ Net_Result _net_udp_recv_message(Net_Socket* sock)
         }
     }
 
-    if ((usize)packet_len > NET_MAX_MESSAGE_SIZE) {
+    usize max_message_size = _net_socket_data(sock)->max_message_size;
+    if ((usize)packet_len > max_message_size) {
         // Receiving with a short buffer discards the rest of the datagram.
         u8 discard = 0;
         recv(sock->fd, &discard, sizeof(discard), 0);
