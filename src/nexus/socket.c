@@ -10,6 +10,62 @@
 #include <unistd.h>
 
 //------------------------------------------------------------------------------
+// _net_message_pattern_ops
+//
+// Pattern operations for the default message socket kind.
+//------------------------------------------------------------------------------
+
+internal const Net_PatternOps _net_message_pattern_ops = {
+    .send = _net_message_send,
+    .recv = _net_message_recv,
+};
+
+//------------------------------------------------------------------------------
+// _net_socket_data
+//
+// Fetches the private runtime block for a socket, or null when one has not yet
+// been created.
+//------------------------------------------------------------------------------
+
+Net_SocketData* _net_socket_data(Net_Socket* sock)
+{
+    return sock->internal_data;
+}
+
+//------------------------------------------------------------------------------
+// _net_socket_data_ensure
+//
+// Creates the private runtime block for a socket on first use.
+//------------------------------------------------------------------------------
+
+Net_SocketData* _net_socket_data_ensure(Net_Socket* sock)
+{
+    Net_SocketData* data = _net_socket_data(sock);
+    if (!data) {
+        data  = mem_realloc(NULL, sizeof(*data), __FILE__, __LINE__);
+        *data = (Net_SocketData){0};
+        data->max_message_size = NET_MAX_MESSAGE_SIZE;
+        sock->internal_data    = data;
+    }
+    return data;
+}
+
+//------------------------------------------------------------------------------
+// _net_socket_set_ops
+//
+// Updates the transport and pattern operation tables attached to a socket.
+//------------------------------------------------------------------------------
+
+void _net_socket_set_ops(Net_Socket*             sock,
+                         const Net_TransportOps* transport_ops,
+                         const Net_PatternOps*   pattern_ops)
+{
+    Net_SocketData* data = _net_socket_data_ensure(sock);
+    data->transport_ops  = transport_ops;
+    data->pattern_ops    = pattern_ops;
+}
+
+//------------------------------------------------------------------------------
 // net_socket
 //
 // Creates a new socket handle in the disconnected state. The handle itself is
