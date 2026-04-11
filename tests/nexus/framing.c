@@ -91,6 +91,34 @@ TEST_CASE(nexus, tcp_message_framing_round_trip)
         args.recv_buffer, args.first_message.data, args.first_message.count);
 }
 
+TEST_CASE(nexus, default_socket_constructor_works_for_message_sockets)
+{
+    FramingServerArgs args = {
+        .url           = "tcp://127.0.0.1:18084",
+        .first_message = S("Hello from net_socket"),
+    };
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(&server_thread, _nexus_server_recv_once, &args));
+
+    _nexus_wait_for_server_start();
+
+    Net_Socket client = net_socket();
+    TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
+    TEST_ASSERT_EQ(
+        net_send(&client, args.first_message.data, args.first_message.count),
+        NET_OK);
+    net_close(&client);
+
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_len, args.first_message.count);
+    TEST_ASSERT_MEM_EQ(
+        args.recv_buffer, args.first_message.data, args.first_message.count);
+}
+
 TEST_CASE(nexus, recv_buffer_too_small_can_drop_pending_message)
 {
     FramingServerArgs args = {
@@ -154,15 +182,28 @@ TEST_CASE(nexus, zero_length_messages_are_valid)
 
 TEST_CASE(nexus, send_rejects_messages_larger_than_maximum)
 {
-    Net_Socket sock = net_socket();
-    sock.state      = NET_STATE_CONNECTED;
-    sock.proto      = NET_PROTO_TCP;
+    FramingServerArgs args = {
+        .url = "tcp://127.0.0.1:18085",
+    };
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(&server_thread, _nexus_server_recv_once, &args));
+
+    _nexus_wait_for_server_start();
+
+    Net_Socket client = net_socket();
+    TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
 
     u8* large_buffer =
         mem_realloc(NULL, NET_MAX_MESSAGE_SIZE + 1, __FILE__, __LINE__);
-
-    TEST_ASSERT_EQ(net_send(&sock, large_buffer, NET_MAX_MESSAGE_SIZE + 1),
+    TEST_ASSERT_EQ(net_send(&client, large_buffer, NET_MAX_MESSAGE_SIZE + 1),
                    NET_BAD_MESSAGE);
+
+    net_close(&client);
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_CLOSED);
 
     mem_free(large_buffer, __FILE__, __LINE__);
 }
