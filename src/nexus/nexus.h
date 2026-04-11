@@ -84,6 +84,17 @@ typedef struct {
     Net_Protocol proto;
 } Net_Endpoint;
 
+typedef struct {
+    Net_Socket* socket;
+    u8*         data;
+    usize       length;
+    usize       capacity;
+
+    // Private implementation state. Callers should treat these fields as
+    // unstable and avoid depending on them directly.
+    void* internal_data;
+} Net_Message;
+
 //------------------------------------------------------------------------------
 // Socket API
 
@@ -126,6 +137,42 @@ Net_Result net_send(Net_Socket* sock, const void* buffer, usize len);
 // Zero-length messages are valid.
 Net_Result
 net_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len);
+
+//------------------------------------------------------------------------------
+// Message API
+
+// Create a reusable message object associated with a specific socket.
+Net_Message net_message_create(Net_Socket* sock);
+
+// Release any storage owned by the message.
+void net_message_done(Net_Message* msg);
+
+// Clear the message payload while preserving its storage for reuse.
+void net_message_clear(Net_Message* msg);
+
+// Append raw or integer data to the message body. Multi-byte integers are
+// stored in network byte order.
+void net_message_append(Net_Message* msg, const void* buffer, usize len);
+void net_message_append_string(Net_Message* msg, string value);
+void net_message_append_u8(Net_Message* msg, u8 value);
+void net_message_append_u16(Net_Message* msg, u16 value);
+void net_message_append_u32(Net_Message* msg, u32 value);
+void net_message_append_u64(Net_Message* msg, u64 value);
+
+// Read and remove data from the front of the message body. Multi-byte integers
+// are converted from network byte order. These return false when there is not
+// enough unread data remaining in the message.
+bool net_message_read(Net_Message* msg, void* buffer, usize len);
+bool net_message_read_string(Net_Message* msg, string* out_value);
+bool net_message_read_u8(Net_Message* msg, u8* out_value);
+bool net_message_read_u16(Net_Message* msg, u16* out_value);
+bool net_message_read_u32(Net_Message* msg, u32* out_value);
+bool net_message_read_u64(Net_Message* msg, u64* out_value);
+
+// Send or receive one full message using the socket associated with the
+// message object.
+Net_Result net_send_msg(Net_Message* msg);
+Net_Result net_recv_msg(Net_Message* msg);
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
