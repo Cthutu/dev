@@ -23,12 +23,17 @@ int run(int argc, char* argv[])
                     net_result_string(result));
     }
 
+    u16 width, height;
+
     prn("Listening for one telnet client on %s", url);
     prn("Type lines to echo them back. Type q to quit.");
 
     Net_Message msg = net_message_create(&sock);
     while (true) {
         result = net_recv(&msg);
+        if (net_telnet_bounds(&msg, &width, &height)) {
+            prn("Received telnet window size: %ux%u", width, height);
+        }
         if (NET_FAILED(result)) {
             fatal_error("Failed to receive telnet line: %s",
                         net_result_string(result));

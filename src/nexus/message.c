@@ -441,6 +441,42 @@ bool net_message_url(Net_Message* msg, string* out_url)
 }
 
 //------------------------------------------------------------------------------
+// net_telnet_bounds
+//
+// Returns the negotiated telnet console bounds associated with a received
+// telnet message.
+//------------------------------------------------------------------------------
+
+bool net_telnet_bounds(Net_Message* msg, u16* out_width, u16* out_height)
+{
+    if (!msg || !out_width || !out_height || !msg->socket) {
+        return false;
+    }
+
+    Net_TelnetState* state = NULL;
+    Net_MessageData* data  = msg->internal_data;
+
+    if (data && data->pipe) {
+        if (data->pipe->kind != NET_PIPE_TCP ||
+            data->pipe->owner->kind != NET_SOCKET_TELNET) {
+            return false;
+        }
+
+        state = &data->pipe->tcp.telnet;
+    } else if (msg->socket->kind == NET_SOCKET_TELNET) {
+        state = &_net_telnet_socket_data(msg->socket)->telnet;
+    }
+
+    if (!state || !state->has_bounds) {
+        return false;
+    }
+
+    *out_width  = state->width;
+    *out_height = state->height;
+    return true;
+}
+
+//------------------------------------------------------------------------------
 // net_send
 //
 // Sends the message body over the message's associated socket.

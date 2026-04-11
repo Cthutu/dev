@@ -82,6 +82,8 @@ int run(int argc, char* argv[])
 - telnet negotiation bytes are handled internally and do not appear in the
   message payload
 - sent telnet lines are written back with `CRLF`
+- if the client supplies NAWS information, you can query the current console
+  width and height with `net_telnet_bounds(&message, &width, &height)`
 
 ## Notes
 
@@ -89,6 +91,8 @@ int run(int argc, char* argv[])
 - The current telnet mode is line-based, not character-based.
 - A received telnet line still uses the normal `Net_Message` API, so you can
   inspect sender metadata with `net_message_id()` and `net_message_url()`.
+- `net_telnet_bounds()` returns false until the client has negotiated and sent
+  its NAWS size information.
 
 ## Related files
 

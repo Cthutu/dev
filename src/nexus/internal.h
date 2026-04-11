@@ -29,14 +29,20 @@ typedef enum : u8 {
 } Net_Telnet_Parse_State;
 
 struct Net_TelnetState {
-    u8*   recv_buffer;         // Raw bytes accumulated from the telnet stream
-    u8*   line_buffer;         // Current decoded line without CRLF
-    usize recv_length;         // Number of unread bytes in recv_buffer
-    usize recv_capacity;       // Allocated capacity for recv_buffer
-    usize line_length;         // Number of decoded line bytes ready so far
-    usize line_capacity;       // Allocated capacity for line_buffer
-    u8    parse_state;         // Current telnet parser state machine state
-    u8    negotiation_command; // Pending DO/DONT/WILL/WONT command byte
+    u8*   recv_buffer;           // Raw bytes accumulated from the telnet stream
+    u8*   line_buffer;           // Current decoded line without CRLF
+    usize recv_length;           // Number of unread bytes in recv_buffer
+    usize recv_capacity;         // Allocated capacity for recv_buffer
+    usize line_length;           // Number of decoded line bytes ready so far
+    usize line_capacity;         // Allocated capacity for line_buffer
+    u16   width;                 // Most recently negotiated console width
+    u16   height;                // Most recently negotiated console height
+    u8    parse_state;           // Current telnet parser state machine state
+    u8    negotiation_command;   // Pending DO/DONT/WILL/WONT command byte
+    u8    subnegotiation_option; // Current SB option byte
+    u8    subnegotiation_data[8]; // Small SB payload buffer for NAWS parsing
+    u8    subnegotiation_length;  // Number of bytes stored in SB payload
+    bool  has_bounds;             // True once NAWS has produced valid bounds
 };
 
 typedef enum : u8 {

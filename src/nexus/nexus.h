@@ -197,6 +197,12 @@ bool net_message_read_u64(Net_Message* msg, u64* out_value);
 bool net_message_id(Net_Message* msg, u64* out_id);
 bool net_message_url(Net_Message* msg, string* out_url);
 
+// Inspect the telnet console bounds associated with a received telnet message.
+// For server sockets this reports the bounds of the originating telnet client.
+// The function returns false until the peer has negotiated and supplied NAWS
+// width/height information.
+bool net_telnet_bounds(Net_Message* msg, u16* out_width, u16* out_height);
+
 // Send one full message using the socket associated with the message object.
 // For TCP the payload is framed internally with a 4-byte length prefix. For
 // UDP the payload is sent as one datagram. Messages larger than

@@ -15,6 +15,9 @@ typedef struct {
     Net_Result bind_result;
     Net_Result recv_result;
     Net_Result send_result;
+    bool       has_bounds;
+    u16        width;
+    u16        height;
     char       received_line[128];
     usize      received_line_len;
 } TelnetServerArgs;
@@ -78,6 +81,7 @@ internal void* _nexus_telnet_echo_server(void* arg)
     Net_Message msg   = net_message_create(&sock);
     args->recv_result = net_recv(&msg);
     if (args->recv_result == NET_OK) {
+        args->has_bounds = net_telnet_bounds(&msg, &args->width, &args->height);
         TEST_ASSERT_LT(msg.length, sizeof(args->received_line));
         memcpy(args->received_line, msg.data, msg.length);
         args->received_line[msg.length] = 0;
@@ -241,6 +245,16 @@ TEST_CASE(nexus, telnet_socket_ignores_telnet_negotiation_bytes)
     TEST_ASSERT(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
     TEST_ASSERT(connect(client_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0);
 
+    u8    do_naws[3];
+    usize received = 0;
+    while (received < sizeof(do_naws)) {
+        ssize_t result =
+            recv(client_fd, do_naws + received, sizeof(do_naws) - received, 0);
+        TEST_ASSERT(result > 0);
+        received += (usize)result;
+    }
+    TEST_ASSERT_MEM_EQ(do_naws, ((u8[]){255, 253, 31}), sizeof(do_naws));
+
     const u8 payload[] = {
         255,
         251,
@@ -256,8 +270,8 @@ TEST_CASE(nexus, telnet_socket_ignores_telnet_negotiation_bytes)
     TEST_ASSERT_EQ(send(client_fd, payload, sizeof(payload), 0),
                    (ssize_t)sizeof(payload));
 
-    u8    response[6];
-    usize received = 0;
+    u8 response[6];
+    received = 0;
     while (received < sizeof(response)) {
         ssize_t result = recv(
             client_fd, response + received, sizeof(response) - received, 0);
@@ -277,6 +291,71 @@ TEST_CASE(nexus, telnet_socket_ignores_telnet_negotiation_bytes)
         response, ((u8[]){255, 254, 1, 255, 252, 3}), sizeof(response));
 }
 
+TEST_CASE(nexus, telnet_socket_reports_negotiated_bounds_from_naws)
+{
+    TelnetServerArgs server_args = {0};
+    _nexus_make_telnet_test_url(server_args.url, sizeof(server_args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(
+        thread_create(&server_thread, _nexus_telnet_echo_server, &server_args));
+
+    _nexus_telnet_wait_for_server_start();
+
+    int client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT(client_fd >= 0);
+
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port   = htons((u16)atoi(strrchr(server_args.url, ':') + 1)),
+    };
+    TEST_ASSERT(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    TEST_ASSERT(connect(client_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0);
+
+    u8    do_naws[3];
+    usize received = 0;
+    while (received < sizeof(do_naws)) {
+        ssize_t result =
+            recv(client_fd, do_naws + received, sizeof(do_naws) - received, 0);
+        TEST_ASSERT(result > 0);
+        received += (usize)result;
+    }
+    TEST_ASSERT_MEM_EQ(do_naws, ((u8[]){255, 253, 31}), sizeof(do_naws));
+
+    const u8 payload[] = {
+        255,
+        251,
+        31,
+        255,
+        250,
+        31,
+        0,
+        80,
+        0,
+        25,
+        255,
+        240,
+        'o',
+        'k',
+        '\r',
+        '\n',
+    };
+    TEST_ASSERT_EQ(send(client_fd, payload, sizeof(payload), 0),
+                   (ssize_t)sizeof(payload));
+
+    close(client_fd);
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_result, NET_OK);
+    TEST_ASSERT(server_args.has_bounds);
+    TEST_ASSERT_EQ(server_args.width, (u16)80);
+    TEST_ASSERT_EQ(server_args.height, (u16)25);
+    TEST_ASSERT(string_equals(
+        string_from(server_args.received_line, server_args.received_line_len),
+        S("ok")));
+}
+
 TEST_CASE(nexus, telnet_socket_rejects_udp_urls)
 {
     char url[64];
@@ -286,4 +365,26 @@ TEST_CASE(nexus, telnet_socket_rejects_udp_urls)
     TEST_ASSERT_EQ(net_bind(&sock, url), NET_PROTOCOL_NOT_SUPPORTED);
     TEST_ASSERT_EQ(net_connect(&sock, url), NET_PROTOCOL_NOT_SUPPORTED);
     net_close(&sock);
+}
+
+TEST_CASE(nexus, telnet_bounds_are_unavailable_on_non_telnet_sockets)
+{
+    u16 width         = 0;
+    u16 height        = 0;
+
+    Net_Socket  basic = net_socket();
+    Net_Message msg   = net_message_create(&basic);
+
+    TEST_ASSERT(!net_telnet_bounds(&msg, &width, &height));
+
+    net_message_done(&msg);
+    net_close(&basic);
+
+    Net_Socket request = net_request_socket();
+    msg                = net_message_create(&request);
+
+    TEST_ASSERT(!net_telnet_bounds(&msg, &width, &height));
+
+    net_message_done(&msg);
+    net_close(&request);
 }

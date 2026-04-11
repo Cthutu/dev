@@ -319,7 +319,8 @@ This module is still intentionally small. Some things are not there yet:
 - no IPv6 URL handling
 - telnet is line-oriented only for now
 - no telnet character mode yet
-- no telnet size negotiation API yet
+- telnet character mode is not implemented yet
+- telnet bounds depend on NAWS support from the client
 - no public wait/poll API yet
 
 ## Related files

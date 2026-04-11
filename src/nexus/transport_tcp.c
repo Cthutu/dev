@@ -45,6 +45,7 @@ internal const Net_TransportOps _net_telnet_tcp_transport_ops = {
 #define NET_TELNET_WILL 251u
 #define NET_TELNET_SB 250u
 #define NET_TELNET_SE 240u
+#define NET_TELNET_OPT_NAWS 31u
 
 //------------------------------------------------------------------------------
 // _net_timeout_deadline_from_option
@@ -257,10 +258,34 @@ internal void _net_telnet_append_line_byte(Net_TelnetState* state, u8 byte)
 
 internal void _net_telnet_reset_buffers(Net_TelnetState* state)
 {
-    state->recv_length         = 0;
-    state->line_length         = 0;
-    state->parse_state         = NET_TELNET_PARSE_NORMAL;
-    state->negotiation_command = 0;
+    state->recv_length           = 0;
+    state->line_length           = 0;
+    state->parse_state           = NET_TELNET_PARSE_NORMAL;
+    state->negotiation_command   = 0;
+    state->subnegotiation_option = 0;
+    state->subnegotiation_length = 0;
+}
+
+internal void _net_telnet_subnegotiation_append(Net_TelnetState* state, u8 byte)
+{
+    if (state->subnegotiation_length < sizeof(state->subnegotiation_data)) {
+        state->subnegotiation_data[state->subnegotiation_length++] = byte;
+    }
+}
+
+internal void _net_telnet_finish_subnegotiation(Net_TelnetState* state)
+{
+    if (state->subnegotiation_option == NET_TELNET_OPT_NAWS &&
+        state->subnegotiation_length >= 4) {
+        state->width      = (u16)(((u16)state->subnegotiation_data[0] << 8) |
+                             (u16)state->subnegotiation_data[1]);
+        state->height     = (u16)(((u16)state->subnegotiation_data[2] << 8) |
+                              (u16)state->subnegotiation_data[3]);
+        state->has_bounds = true;
+    }
+
+    state->subnegotiation_option = 0;
+    state->subnegotiation_length = 0;
 }
 
 internal Net_Result _net_telnet_send_negotiation_response(Net_Socket* sock,
@@ -268,6 +293,10 @@ internal Net_Result _net_telnet_send_negotiation_response(Net_Socket* sock,
                                                           u8          command,
                                                           u8          option)
 {
+    if (command == NET_TELNET_WILL && option == NET_TELNET_OPT_NAWS) {
+        return NET_OK;
+    }
+
     u8 response[3] = {NET_TELNET_IAC, 0, option};
     switch (command) {
     case NET_TELNET_DO:
@@ -287,6 +316,19 @@ internal Net_Result _net_telnet_send_negotiation_response(Net_Socket* sock,
                           _net_socket_data(sock)->options.send_timeout_ms);
     return _net_tcp_send_all_fd(
         fd, response, sizeof(response), deadline, nonblocking);
+}
+
+internal Net_Result _net_telnet_request_naws(Net_Socket* sock, int fd)
+{
+    u8 request[3] = {NET_TELNET_IAC, NET_TELNET_DO, NET_TELNET_OPT_NAWS};
+
+    bool      nonblocking = _net_socket_nonblocking(sock);
+    TimePoint deadline =
+        nonblocking ? time_now()
+                    : _net_timeout_deadline_from_option(
+                          _net_socket_data(sock)->options.send_timeout_ms);
+    return _net_tcp_send_all_fd(
+        fd, request, sizeof(request), deadline, nonblocking);
 }
 
 internal Net_Result _net_telnet_state_extract_line(Net_Socket*      sock,
@@ -326,7 +368,9 @@ internal Net_Result _net_telnet_state_extract_line(Net_Socket*      sock,
                 state->parse_state         = NET_TELNET_PARSE_NEGOTIATION;
                 state->negotiation_command = byte;
             } else if (byte == NET_TELNET_SB) {
-                state->parse_state = NET_TELNET_PARSE_SUBNEGOTIATION;
+                state->parse_state           = NET_TELNET_PARSE_SUBNEGOTIATION;
+                state->subnegotiation_option = 0;
+                state->subnegotiation_length = 0;
             } else {
                 state->parse_state = NET_TELNET_PARSE_NORMAL;
             }
@@ -345,15 +389,26 @@ internal Net_Result _net_telnet_state_extract_line(Net_Socket*      sock,
             break;
 
         case NET_TELNET_PARSE_SUBNEGOTIATION:
+            if (state->subnegotiation_option == 0) {
+                state->subnegotiation_option = byte;
+                break;
+            }
+
             if (byte == NET_TELNET_IAC) {
                 state->parse_state = NET_TELNET_PARSE_SUBNEGOTIATION_IAC;
+            } else {
+                _net_telnet_subnegotiation_append(state, byte);
             }
             break;
 
         case NET_TELNET_PARSE_SUBNEGOTIATION_IAC:
             if (byte == NET_TELNET_SE) {
+                _net_telnet_finish_subnegotiation(state);
                 state->parse_state = NET_TELNET_PARSE_NORMAL;
-            } else if (byte != NET_TELNET_IAC) {
+            } else if (byte == NET_TELNET_IAC) {
+                _net_telnet_subnegotiation_append(state, byte);
+                state->parse_state = NET_TELNET_PARSE_SUBNEGOTIATION;
+            } else {
                 state->parse_state = NET_TELNET_PARSE_SUBNEGOTIATION;
             }
             break;
@@ -650,7 +705,14 @@ internal Net_Result _net_tcp_accept_pending(Net_Socket* sock)
             }
         }
 
-        _net_pipe_create_tcp(sock, client_fd);
+        Net_Pipe* pipe = _net_pipe_create_tcp(sock, client_fd);
+        if (sock->kind == NET_SOCKET_TELNET) {
+            Net_Result result = _net_telnet_request_naws(sock, client_fd);
+            if (NET_FAILED(result)) {
+                _net_pipe_close(pipe);
+                return result;
+            }
+        }
     }
 }
 

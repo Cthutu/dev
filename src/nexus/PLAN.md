@@ -31,6 +31,7 @@ The following work is now in place:
 - multi-client TCP server support
 - request/reply socket kinds
 - telnet socket kind with line-oriented TCP behaviour
+- telnet bounds query via NAWS negotiation
 - socket options for:
   - connect retry
   - connect timeout
@@ -55,11 +56,11 @@ The first telnet milestone is now in place:
 - `demo-telnet.c`
 - line-oriented telnet messages over TCP
 - simple telnet option rejection so line-mode clients can connect cleanly
+- `net_telnet_bounds()` for querying negotiated client width/height
 
 The next telnet work should build on that:
 
 - character-oriented mode for interactive applications and MUD-style input
-- telnet state query helpers such as `net_telnet_size()`
 - terminal width and height tracking from telnet option negotiation
 - a dedicated telnet how-to document
 
