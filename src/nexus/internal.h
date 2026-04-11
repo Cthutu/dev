@@ -11,11 +11,14 @@
 //------------------------------------------------------------------------------
 // Private runtime structures
 
-typedef struct Net_TransportOps Net_TransportOps;
-typedef struct Net_PatternOps   Net_PatternOps;
-typedef struct Net_MessageData  Net_MessageData;
-typedef struct Net_Pipe         Net_Pipe;
-typedef struct Net_TelnetState  Net_TelnetState;
+typedef struct Net_TransportOps     Net_TransportOps;
+typedef struct Net_PatternOps       Net_PatternOps;
+typedef struct Net_MessageData      Net_MessageData;
+typedef struct Net_Pipe             Net_Pipe;
+typedef struct Net_TelnetState      Net_TelnetState;
+typedef struct Net_SocketData       Net_SocketData;
+typedef struct Net_ReqRepSocketData Net_ReqRepSocketData;
+typedef struct Net_TelnetSocketData Net_TelnetSocketData;
 
 typedef enum : u8 {
     NET_TELNET_PARSE_NORMAL,
@@ -67,21 +70,30 @@ typedef struct {
     u64 nonblocking;
 } Net_SocketOptions;
 
-typedef struct {
+struct Net_SocketData {
+    Net_Socket_Kind         kind;
     const Net_TransportOps* transport_ops;
     const Net_PatternOps*   pattern_ops;
     Net_SocketOptions       options;
     Array(Net_Pipe*) pipes;
-    void*           pending_message;
-    Net_Pipe*       pending_pipe;
-    usize           pending_message_len;
-    usize           pending_message_capacity;
-    usize           max_message_size;
-    u32             next_pipe_id;
+    void*     pending_message;
+    Net_Pipe* pending_pipe;
+    usize     pending_message_len;
+    usize     pending_message_capacity;
+    usize     max_message_size;
+    u32       next_pipe_id;
+    bool      has_pending_message;
+};
+
+struct Net_ReqRepSocketData {
+    Net_SocketData base;
+    bool           send_next;
+};
+
+struct Net_TelnetSocketData {
+    Net_SocketData  base;
     Net_TelnetState telnet;
-    bool            reqrep_send_next;
-    bool            has_pending_message;
-} Net_SocketData;
+};
 
 struct Net_MessageData {
     u8*       string_storage;
@@ -111,32 +123,34 @@ bool _net_parse_url(cstr url, Net_Endpoint* out_ep);
 //------------------------------------------------------------------------------
 // Shared socket helpers
 
-Net_SocketData* _net_socket_data(Net_Socket* sock);
-Net_SocketData* _net_socket_data_ensure(Net_Socket* sock);
-void            _net_socket_set_ops(Net_Socket*             sock,
-                                    const Net_TransportOps* transport_ops,
-                                    const Net_PatternOps*   pattern_ops);
-void            _net_log_error(void);
-int             _net_create_socket(Net_Endpoint* endpoint);
-void            _net_socket_clear_pending(Net_Socket* sock);
-void            _net_socket_close_pipes(Net_Socket* sock);
-void            _net_socket_store_pending(Net_Socket* sock,
-                                          const void* buffer,
-                                          usize       len,
-                                          Net_Pipe*   pipe);
-Net_Result      _net_socket_send(Net_Message* msg);
-Net_Result      _net_socket_recv(Net_Socket* sock,
-                                 void*       buffer,
-                                 usize       len,
-                                 usize*      out_recv_len,
-                                 Net_Pipe**  out_pipe);
-Net_Result      _net_socket_consume_pending(Net_Socket* sock,
-                                            void*       buffer,
-                                            usize       len,
-                                            usize*      out_recv_len,
-                                            Net_Pipe**  out_pipe);
-void            _net_endpoint_to_addr(Net_Endpoint*       endpoint,
-                                      struct sockaddr_in* out_addr);
+Net_SocketData*       _net_socket_data(Net_Socket* sock);
+Net_SocketData*       _net_socket_data_ensure(Net_Socket* sock);
+Net_ReqRepSocketData* _net_reqrep_socket_data(Net_Socket* sock);
+Net_TelnetSocketData* _net_telnet_socket_data(Net_Socket* sock);
+void                  _net_socket_set_ops(Net_Socket*             sock,
+                                          const Net_TransportOps* transport_ops,
+                                          const Net_PatternOps*   pattern_ops);
+void                  _net_log_error(void);
+int                   _net_create_socket(Net_Endpoint* endpoint);
+void                  _net_socket_clear_pending(Net_Socket* sock);
+void                  _net_socket_close_pipes(Net_Socket* sock);
+void                  _net_socket_store_pending(Net_Socket* sock,
+                                                const void* buffer,
+                                                usize       len,
+                                                Net_Pipe*   pipe);
+Net_Result            _net_socket_send(Net_Message* msg);
+Net_Result            _net_socket_recv(Net_Socket* sock,
+                                       void*       buffer,
+                                       usize       len,
+                                       usize*      out_recv_len,
+                                       Net_Pipe**  out_pipe);
+Net_Result            _net_socket_consume_pending(Net_Socket* sock,
+                                                  void*       buffer,
+                                                  usize       len,
+                                                  usize*      out_recv_len,
+                                                  Net_Pipe**  out_pipe);
+void                  _net_endpoint_to_addr(Net_Endpoint*       endpoint,
+                                            struct sockaddr_in* out_addr);
 
 //------------------------------------------------------------------------------
 // Pipe helpers

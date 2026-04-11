@@ -20,14 +20,15 @@ Net_Result _net_reqrep_send(Net_Message* msg)
         return NET_NOT_CONNECTED;
     }
 
-    Net_Socket*     sock = msg->socket;
-    Net_SocketData* data = _net_socket_data(sock);
+    Net_Socket*           sock = msg->socket;
+    Net_SocketData*       data = _net_socket_data(sock);
+    Net_ReqRepSocketData* rdat = _net_reqrep_socket_data(sock);
     if (!data || !data->pattern_ops || !data->transport_ops ||
         !data->transport_ops->send) {
         return NET_NOT_CONNECTED;
     }
 
-    if (!data->reqrep_send_next) {
+    if (!rdat->send_next) {
         return NET_WRONG_STATE;
     }
 
@@ -51,7 +52,7 @@ Net_Result _net_reqrep_send(Net_Message* msg)
         result = data->transport_ops->send(sock, msg->data, msg->length);
     }
     if (result == NET_OK) {
-        data->reqrep_send_next = false;
+        rdat->send_next = false;
     }
 
     return result;
@@ -71,7 +72,8 @@ Net_Result _net_reqrep_recv(Net_Socket* sock,
                             usize*      out_recv_len,
                             Net_Pipe**  out_pipe)
 {
-    Net_SocketData* data = _net_socket_data(sock);
+    Net_SocketData*       data = _net_socket_data(sock);
+    Net_ReqRepSocketData* rdat = _net_reqrep_socket_data(sock);
 
     if (sock->state != NET_STATE_CONNECTED &&
         sock->state != NET_STATE_WAITING_CONNECTION) {
@@ -82,7 +84,7 @@ Net_Result _net_reqrep_recv(Net_Socket* sock,
         return NET_NOT_CONNECTED;
     }
 
-    if (data->reqrep_send_next) {
+    if (rdat->send_next) {
         return NET_WRONG_STATE;
     }
 
@@ -96,7 +98,7 @@ Net_Result _net_reqrep_recv(Net_Socket* sock,
     Net_Result result =
         _net_socket_consume_pending(sock, buffer, len, out_recv_len, out_pipe);
     if (result == NET_OK) {
-        data->reqrep_send_next = true;
+        rdat->send_next = true;
     }
 
     return result;

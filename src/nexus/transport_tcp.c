@@ -1212,7 +1212,11 @@ internal Net_Result _net_tcp_recv_telnet_message(Net_Socket* sock)
 
     if (sock->state == NET_STATE_CONNECTED) {
         return _net_tcp_recv_telnet_message_from_fd(
-            sock, sock->fd, NULL, &_net_socket_data(sock)->telnet, deadline);
+            sock,
+            sock->fd,
+            NULL,
+            &_net_telnet_socket_data(sock)->telnet,
+            deadline);
     }
 
     while (true) {

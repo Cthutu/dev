@@ -37,6 +37,42 @@ Net_SocketData* _net_socket_data(Net_Socket* sock)
     return sock->internal_data;
 }
 
+internal Net_SocketData* _net_socket_data_alloc(Net_Socket* sock)
+{
+    Net_SocketData* data = NULL;
+
+    switch (sock->kind) {
+    case NET_SOCKET_REQUEST:
+    case NET_SOCKET_REPLY:
+        data =
+            mem_realloc(NULL, sizeof(Net_ReqRepSocketData), __FILE__, __LINE__);
+        *(Net_ReqRepSocketData*)data = (Net_ReqRepSocketData){0};
+        break;
+
+    case NET_SOCKET_TELNET:
+        data =
+            mem_realloc(NULL, sizeof(Net_TelnetSocketData), __FILE__, __LINE__);
+        *(Net_TelnetSocketData*)data = (Net_TelnetSocketData){0};
+        break;
+
+    case NET_SOCKET_BASIC:
+    default:
+        data  = mem_realloc(NULL, sizeof(Net_SocketData), __FILE__, __LINE__);
+        *data = (Net_SocketData){0};
+        break;
+    }
+
+    data->kind                          = sock->kind;
+    data->max_message_size              = NET_MAX_MESSAGE_SIZE;
+    data->options.connect_timeout_ms    = NET_WAIT_IMMEDIATE;
+    data->options.reconnect_interval_ms = NET_WAIT_IMMEDIATE;
+    data->options.send_timeout_ms       = NET_WAIT_INFINITE;
+    data->options.recv_timeout_ms       = NET_WAIT_INFINITE;
+    data->options.nonblocking           = 0;
+
+    return data;
+}
+
 //------------------------------------------------------------------------------
 // _net_socket_data_ensure
 //
@@ -47,18 +83,26 @@ Net_SocketData* _net_socket_data_ensure(Net_Socket* sock)
 {
     Net_SocketData* data = _net_socket_data(sock);
     if (!data) {
-        data  = mem_realloc(NULL, sizeof(*data), __FILE__, __LINE__);
-        *data = (Net_SocketData){0};
-        data->max_message_size              = NET_MAX_MESSAGE_SIZE;
-        data->options.connect_timeout_ms    = NET_WAIT_IMMEDIATE;
-        data->options.reconnect_interval_ms = NET_WAIT_IMMEDIATE;
-        data->options.send_timeout_ms       = NET_WAIT_INFINITE;
-        data->options.recv_timeout_ms       = NET_WAIT_INFINITE;
-        data->options.nonblocking           = 0;
-        data->reqrep_send_next              = false;
-        sock->internal_data                 = data;
+        data                = _net_socket_data_alloc(sock);
+        sock->internal_data = data;
     }
     return data;
+}
+
+Net_ReqRepSocketData* _net_reqrep_socket_data(Net_Socket* sock)
+{
+    Net_SocketData* data = _net_socket_data_ensure(sock);
+    ASSERT(data->kind == NET_SOCKET_REQUEST || data->kind == NET_SOCKET_REPLY,
+           "Socket runtime kind is not request/reply");
+    return (Net_ReqRepSocketData*)data;
+}
+
+Net_TelnetSocketData* _net_telnet_socket_data(Net_Socket* sock)
+{
+    Net_SocketData* data = _net_socket_data_ensure(sock);
+    ASSERT(data->kind == NET_SOCKET_TELNET,
+           "Socket runtime kind is not telnet");
+    return (Net_TelnetSocketData*)data;
 }
 
 //------------------------------------------------------------------------------
@@ -105,10 +149,13 @@ Net_Socket net_socket(void)
 
 Net_Socket net_request_socket(void)
 {
-    Net_Socket sock = net_socket();
-    sock.kind       = NET_SOCKET_REQUEST;
+    Net_Socket sock = (Net_Socket){
+        .state = NET_STATE_DISCONNECTED,
+        .fd    = -1,
+        .kind  = NET_SOCKET_REQUEST,
+    };
     _net_socket_set_ops(&sock, NULL, &_net_reqrep_pattern_ops);
-    _net_socket_data_ensure(&sock)->reqrep_send_next = true;
+    _net_reqrep_socket_data(&sock)->send_next = true;
     return sock;
 }
 
@@ -121,10 +168,13 @@ Net_Socket net_request_socket(void)
 
 Net_Socket net_reply_socket(void)
 {
-    Net_Socket sock = net_socket();
-    sock.kind       = NET_SOCKET_REPLY;
+    Net_Socket sock = (Net_Socket){
+        .state = NET_STATE_DISCONNECTED,
+        .fd    = -1,
+        .kind  = NET_SOCKET_REPLY,
+    };
     _net_socket_set_ops(&sock, NULL, &_net_reqrep_pattern_ops);
-    _net_socket_data_ensure(&sock)->reqrep_send_next = false;
+    _net_reqrep_socket_data(&sock)->send_next = false;
     return sock;
 }
 
@@ -137,8 +187,12 @@ Net_Socket net_reply_socket(void)
 
 Net_Socket net_telnet_socket(void)
 {
-    Net_Socket sock = net_socket();
-    sock.kind       = NET_SOCKET_TELNET;
+    Net_Socket sock = (Net_Socket){
+        .state = NET_STATE_DISCONNECTED,
+        .fd    = -1,
+        .kind  = NET_SOCKET_TELNET,
+    };
+    _net_socket_set_ops(&sock, NULL, &_net_message_pattern_ops);
     return sock;
 }
 
@@ -160,7 +214,9 @@ void net_close(Net_Socket* sock)
 
     _net_socket_clear_pending(sock);
     if (sock->internal_data) {
-        _net_telnet_state_done(&_net_socket_data(sock)->telnet);
+        if (_net_socket_data(sock)->kind == NET_SOCKET_TELNET) {
+            _net_telnet_state_done(&_net_telnet_socket_data(sock)->telnet);
+        }
         sock->internal_data = mem_free(sock->internal_data, __FILE__, __LINE__);
     }
     sock->state = NET_STATE_DISCONNECTED;
