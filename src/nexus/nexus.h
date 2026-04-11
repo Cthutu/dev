@@ -62,17 +62,19 @@ typedef enum : u8 {
     NET_PROTO_UDP,
 } Net_Protocol;
 
+typedef enum : u8 {
+    NET_KIND_MESSAGE,
+} Net_Kind;
+
 typedef struct {
     Net_State    state;
     int          fd; // Socket file descriptor
     Net_Protocol proto;
+    Net_Kind     kind;
 
     // Private implementation state. Callers should treat these fields as
     // unstable and avoid depending on them directly.
-    void* pending_message;
-    usize pending_message_len;
-    usize pending_message_capacity;
-    bool  has_pending_message;
+    void* internal_data;
 } Net_Socket;
 
 typedef struct {
