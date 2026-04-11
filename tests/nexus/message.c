@@ -57,6 +57,17 @@ typedef struct {
     string     received_string;
 } DelayedBindServerArgs;
 
+typedef struct {
+    char       url[64];
+    u32        recv_timeout_ms;
+    u32        client_delay_ms;
+    u32        client_hold_ms;
+    Net_Result bind_result;
+    Net_Result recv_result;
+    usize      recv_elapsed_ms;
+    string     received_string;
+} RecvTimeoutArgs;
+
 internal void _nexus_message_wait_for_server_start(void)
 {
     thread_sleep_ms(50);
@@ -244,6 +255,58 @@ internal void* _nexus_delayed_bind_server(void* arg)
     if (args->recv_result == NET_OK) {
         TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
     }
+
+    net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
+internal void* _nexus_recv_timeout_server(void* arg)
+{
+    RecvTimeoutArgs* args = arg;
+
+    Net_Socket sock       = net_socket();
+    args->bind_result     = net_bind(&sock, args->url);
+    if (NET_FAILED(args->bind_result)) {
+        return NULL;
+    }
+
+    TEST_ASSERT_EQ(
+        net_set_option(&sock, NET_OPT_RECV_TIMEOUT_MS, args->recv_timeout_ms),
+        NET_OK);
+
+    Net_Message msg   = net_message_create(&sock);
+    TimePoint   start = time_now();
+    args->recv_result = net_recv(&msg);
+    args->recv_elapsed_ms =
+        (usize)time_duration_to_ms(time_elapsed(start, time_now()));
+    if (args->recv_result == NET_OK) {
+        TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
+    }
+
+    net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
+internal void* _nexus_delayed_client_send(void* arg)
+{
+    RecvTimeoutArgs* args = arg;
+
+    thread_sleep_ms(args->client_delay_ms);
+
+    Net_Socket sock = net_socket();
+    if (NET_FAILED(net_connect(&sock, args->url))) {
+        return NULL;
+    }
+
+    if (args->client_hold_ms > 0) {
+        thread_sleep_ms(args->client_hold_ms);
+    }
+
+    Net_Message msg = net_message_create(&sock);
+    net_message_append_string(&msg, S("delayed-send"));
+    (void)net_send(&msg);
 
     net_message_done(&msg);
     net_close(&sock);
@@ -527,4 +590,70 @@ TEST_CASE(nexus, connect_times_out_when_server_never_binds)
     TEST_ASSERT_GE(elapsed_ms, 100u);
 
     net_close(&client_sock);
+}
+
+TEST_CASE(nexus, recv_times_out_when_no_client_arrives)
+{
+    RecvTimeoutArgs args = {
+        .recv_timeout_ms = 120,
+    };
+    _nexus_make_message_test_url(args.url, sizeof(args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(
+        thread_create(&server_thread, _nexus_recv_timeout_server, &args));
+
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_TIMEOUT);
+    TEST_ASSERT_GE(args.recv_elapsed_ms, (usize)80);
+}
+
+TEST_CASE(nexus, recv_times_out_when_client_connects_but_sends_nothing)
+{
+    RecvTimeoutArgs args = {
+        .recv_timeout_ms = 120,
+        .client_delay_ms = 20,
+        .client_hold_ms  = 200,
+    };
+    _nexus_make_message_test_url(args.url, sizeof(args.url));
+
+    Thread server_thread;
+    Thread client_thread;
+    TEST_ASSERT(
+        thread_create(&server_thread, _nexus_recv_timeout_server, &args));
+    TEST_ASSERT(
+        thread_create(&client_thread, _nexus_delayed_client_send, &args));
+
+    thread_join(&server_thread);
+    thread_join(&client_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_TIMEOUT);
+    TEST_ASSERT_GE(args.recv_elapsed_ms, (usize)80);
+}
+
+TEST_CASE(nexus, recv_succeeds_when_message_arrives_before_timeout)
+{
+    RecvTimeoutArgs args = {
+        .recv_timeout_ms = 500,
+        .client_delay_ms = 100,
+    };
+    _nexus_make_message_test_url(args.url, sizeof(args.url));
+
+    Thread server_thread;
+    Thread client_thread;
+    TEST_ASSERT(
+        thread_create(&server_thread, _nexus_recv_timeout_server, &args));
+    TEST_ASSERT(
+        thread_create(&client_thread, _nexus_delayed_client_send, &args));
+
+    thread_join(&server_thread);
+    thread_join(&client_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_OK);
+    TEST_ASSERT_EQ(args.received_string.count, (usize)12);
+    TEST_ASSERT_MEM_EQ(args.received_string.data, "delayed-send", 12);
 }

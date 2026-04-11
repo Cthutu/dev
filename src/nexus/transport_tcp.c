@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -28,13 +29,101 @@ internal const Net_TransportOps _net_tcp_transport_ops = {
 #define NET_DEFAULT_CONNECT_RETRY_INTERVAL_MS 50ull
 
 //------------------------------------------------------------------------------
+// _net_timeout_deadline_from_option
+//
+// Converts a millisecond timeout option into an absolute deadline. A deadline
+// of zero means the operation may wait forever.
+//------------------------------------------------------------------------------
+
+internal TimePoint _net_timeout_deadline_from_option(u64 timeout_ms)
+{
+    if (timeout_ms == NET_WAIT_INFINITE) {
+        return 0;
+    }
+
+    return time_add_duration(time_now(), time_from_ms(timeout_ms));
+}
+
+//------------------------------------------------------------------------------
+// _net_timeout_poll_ms
+//
+// Converts an absolute deadline into the integer timeout expected by `poll()`.
+//------------------------------------------------------------------------------
+
+internal int _net_timeout_poll_ms(TimePoint deadline)
+{
+    if (deadline == 0) {
+        return -1;
+    }
+
+    TimePoint now = time_now();
+    if (now >= deadline) {
+        return 0;
+    }
+
+    u64 remaining_ms = time_duration_to_ms(time_elapsed(now, deadline));
+    return (int)MIN(remaining_ms, (u64)INT_MAX);
+}
+
+//------------------------------------------------------------------------------
+// _net_poll_fd
+//
+// Waits for the requested readiness on one file descriptor until the deadline
+// expires.
+//------------------------------------------------------------------------------
+
+internal Net_Result _net_poll_fd(int fd, short events, TimePoint deadline)
+{
+    struct pollfd poll_fd = {
+        .fd     = fd,
+        .events = events,
+    };
+
+    while (true) {
+        int poll_result = poll(&poll_fd, 1, _net_timeout_poll_ms(deadline));
+        if (poll_result == 0) {
+            return NET_TIMEOUT;
+        }
+
+        if (poll_result < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            _net_log_error();
+            switch (errno) {
+            case ENETDOWN:
+                return NET_NO_NETWORK;
+            default:
+                return NET_ERROR;
+            }
+        }
+
+        if (poll_fd.revents & (POLLERR | POLLNVAL)) {
+            return NET_ERROR;
+        }
+
+        if (poll_fd.revents & POLLHUP) {
+            return NET_CLOSED;
+        }
+
+        if (poll_fd.revents & events) {
+            return NET_OK;
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
 // _net_tcp_send_all_fd
 //
 // Writes the full buffer to the given TCP file descriptor, retrying partial
 // writes until the requested byte count has been sent or an error occurs.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_tcp_send_all_fd(int fd, const u8* buffer, usize len)
+internal Net_Result _net_tcp_send_all_fd(int       fd,
+                                         const u8* buffer,
+                                         usize     len,
+                                         TimePoint deadline)
 {
     usize sent  = 0;
     int   flags = 0;
@@ -44,6 +133,11 @@ internal Net_Result _net_tcp_send_all_fd(int fd, const u8* buffer, usize len)
 #endif
 
     while (sent < len) {
+        Net_Result wait_result = _net_poll_fd(fd, POLLOUT, deadline);
+        if (NET_FAILED(wait_result)) {
+            return wait_result;
+        }
+
         ssize_t result = send(fd, buffer + sent, len - sent, flags);
         if (result < 0) {
             _net_log_error();
@@ -112,12 +206,20 @@ internal bool _net_tcp_should_retry_connect(int err)
 // is the primitive used to assemble framed messages from the stream transport.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_tcp_recv_exact_fd(int fd, void* buffer, usize len)
+internal Net_Result _net_tcp_recv_exact_fd(int       fd,
+                                           void*     buffer,
+                                           usize     len,
+                                           TimePoint deadline)
 {
     u8*   out       = buffer;
     usize recv_size = 0;
 
     while (recv_size < len) {
+        Net_Result wait_result = _net_poll_fd(fd, POLLIN, deadline);
+        if (NET_FAILED(wait_result)) {
+            return wait_result;
+        }
+
         ssize_t result = recv(fd, out + recv_size, len - recv_size, 0);
         if (result < 0) {
             _net_log_error();
@@ -148,7 +250,9 @@ internal Net_Result _net_tcp_recv_exact_fd(int fd, void* buffer, usize len)
 // the stream in sync when we detect an oversized or otherwise invalid frame.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_tcp_discard_exact_fd(int fd, usize len)
+internal Net_Result _net_tcp_discard_exact_fd(int       fd,
+                                              usize     len,
+                                              TimePoint deadline)
 {
     u8    discard[4096];
     usize remaining = len;
@@ -158,7 +262,8 @@ internal Net_Result _net_tcp_discard_exact_fd(int fd, usize len)
         usize      before = remaining;
         // Reuse a small stack buffer because the discarded bytes are not needed
         // after they have been consumed from the stream.
-        Net_Result result = _net_tcp_recv_exact_fd(fd, discard, chunk);
+        Net_Result result =
+            _net_tcp_recv_exact_fd(fd, discard, chunk, deadline);
         if (NET_FAILED(result)) {
             return result;
         }
@@ -176,10 +281,11 @@ internal Net_Result _net_tcp_discard_exact_fd(int fd, usize len)
 
 Net_Result _net_tcp_send_framed_fd(int fd, const void* buffer, usize len)
 {
-    u32 frame_len = htonl((u32)len);
+    TimePoint deadline  = 0;
+    u32       frame_len = htonl((u32)len);
 
-    Net_Result result =
-        _net_tcp_send_all_fd(fd, (const u8*)&frame_len, sizeof(frame_len));
+    Net_Result result   = _net_tcp_send_all_fd(
+        fd, (const u8*)&frame_len, sizeof(frame_len), deadline);
     if (NET_FAILED(result)) {
         return result;
     }
@@ -188,7 +294,7 @@ Net_Result _net_tcp_send_framed_fd(int fd, const void* buffer, usize len)
         return NET_OK;
     }
 
-    return _net_tcp_send_all_fd(fd, buffer, len);
+    return _net_tcp_send_all_fd(fd, buffer, len, deadline);
 }
 
 //------------------------------------------------------------------------------
@@ -255,7 +361,9 @@ internal Net_Result _net_tcp_accept_pending(Net_Socket* sock)
 // accepts were handled and the poll must be repeated.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out)
+internal Net_Result _net_tcp_poll_ready_pipe(Net_Socket* sock,
+                                             Net_Pipe**  out,
+                                             TimePoint   deadline)
 {
     Net_SocketData* data         = _net_socket_data(sock);
     Array(struct pollfd) pollfds = 0;
@@ -283,7 +391,13 @@ internal Net_Result _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out)
         array_push(pipes, pipe);
     }
 
-    int poll_result = poll(pollfds, array_count(pollfds), -1);
+    int poll_result =
+        poll(pollfds, array_count(pollfds), _net_timeout_poll_ms(deadline));
+    if (poll_result == 0) {
+        array_free(pollfds);
+        array_free(pipes);
+        return NET_TIMEOUT;
+    }
     if (poll_result < 0) {
         array_free(pollfds);
         array_free(pipes);
@@ -352,11 +466,12 @@ internal usize _net_tcp_open_pipe_count(Net_Socket* sock)
 
 internal Net_Result _net_tcp_recv_message_from_fd(Net_Socket* sock,
                                                   int         fd,
-                                                  Net_Pipe*   pipe)
+                                                  Net_Pipe*   pipe,
+                                                  TimePoint   deadline)
 {
     u32        frame_len_n = 0;
     Net_Result result =
-        _net_tcp_recv_exact_fd(fd, &frame_len_n, sizeof(frame_len_n));
+        _net_tcp_recv_exact_fd(fd, &frame_len_n, sizeof(frame_len_n), deadline);
     if (NET_FAILED(result)) {
         return result;
     }
@@ -366,7 +481,7 @@ internal Net_Result _net_tcp_recv_message_from_fd(Net_Socket* sock,
     if (frame_len > max_message_size) {
         // Consume the full oversized frame so future receives remain aligned to
         // the next frame boundary.
-        result = _net_tcp_discard_exact_fd(fd, frame_len);
+        result = _net_tcp_discard_exact_fd(fd, frame_len, deadline);
         if (NET_FAILED(result)) {
             return result;
         }
@@ -379,7 +494,7 @@ internal Net_Result _net_tcp_recv_message_from_fd(Net_Socket* sock,
     }
 
     void* frame_buffer = mem_realloc(NULL, frame_len, __FILE__, __LINE__);
-    result             = _net_tcp_recv_exact_fd(fd, frame_buffer, frame_len);
+    result = _net_tcp_recv_exact_fd(fd, frame_buffer, frame_len, deadline);
     if (NET_FAILED(result)) {
         mem_free(frame_buffer, __FILE__, __LINE__);
         return result;
@@ -551,7 +666,21 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 
 Net_Result _net_tcp_send(Net_Socket* sock, const void* buffer, usize len)
 {
-    return _net_tcp_send_framed_fd(sock->fd, buffer, len);
+    TimePoint deadline = _net_timeout_deadline_from_option(
+        _net_socket_data(sock)->options.send_timeout_ms);
+    u32 frame_len     = htonl((u32)len);
+
+    Net_Result result = _net_tcp_send_all_fd(
+        sock->fd, (const u8*)&frame_len, sizeof(frame_len), deadline);
+    if (NET_FAILED(result)) {
+        return result;
+    }
+
+    if (len == 0) {
+        return NET_OK;
+    }
+
+    return _net_tcp_send_all_fd(sock->fd, buffer, len, deadline);
 }
 
 //------------------------------------------------------------------------------
@@ -563,13 +692,16 @@ Net_Result _net_tcp_send(Net_Socket* sock, const void* buffer, usize len)
 
 Net_Result _net_tcp_recv_message(Net_Socket* sock)
 {
+    TimePoint deadline = _net_timeout_deadline_from_option(
+        _net_socket_data(sock)->options.recv_timeout_ms);
+
     if (sock->state == NET_STATE_CONNECTED) {
-        return _net_tcp_recv_message_from_fd(sock, sock->fd, NULL);
+        return _net_tcp_recv_message_from_fd(sock, sock->fd, NULL, deadline);
     }
 
     while (true) {
         Net_Pipe*  pipe   = NULL;
-        Net_Result result = _net_tcp_poll_ready_pipe(sock, &pipe);
+        Net_Result result = _net_tcp_poll_ready_pipe(sock, &pipe, deadline);
         if (NET_FAILED(result)) {
             return result;
         }
@@ -578,7 +710,8 @@ Net_Result _net_tcp_recv_message(Net_Socket* sock)
             continue;
         }
 
-        result = _net_tcp_recv_message_from_fd(sock, pipe->tcp.fd, pipe);
+        result =
+            _net_tcp_recv_message_from_fd(sock, pipe->tcp.fd, pipe, deadline);
         if (result == NET_CLOSED) {
             // A closed client should not tear down the whole listener. Mark the
             // pipe closed and keep waiting for another client message.

@@ -7,7 +7,9 @@
 #include <nexus/internal.h>
 
 #include <errno.h>
+#include <limits.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -23,6 +25,55 @@ internal const Net_TransportOps _net_udp_transport_ops = {
 };
 
 //------------------------------------------------------------------------------
+// _net_udp_wait_fd
+//
+// Waits for UDP socket readiness according to the configured timeout option.
+// A timeout of `NET_WAIT_INFINITE` blocks forever.
+//------------------------------------------------------------------------------
+
+internal Net_Result _net_udp_wait_fd(int fd, short events, u64 timeout_ms)
+{
+    int timeout = -1;
+    if (timeout_ms != NET_WAIT_INFINITE) {
+        timeout = (int)MIN(timeout_ms, (u64)INT_MAX);
+    }
+
+    struct pollfd poll_fd = {
+        .fd     = fd,
+        .events = events,
+    };
+
+    while (true) {
+        int poll_result = poll(&poll_fd, 1, timeout);
+        if (poll_result == 0) {
+            return NET_TIMEOUT;
+        }
+
+        if (poll_result < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            _net_log_error();
+            switch (errno) {
+            case ENETDOWN:
+                return NET_NO_NETWORK;
+            default:
+                return NET_ERROR;
+            }
+        }
+
+        if (poll_fd.revents & (POLLERR | POLLNVAL)) {
+            return NET_ERROR;
+        }
+
+        if (poll_fd.revents & events) {
+            return NET_OK;
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
 // _net_udp_send_to_addr
 //
 // Sends one UDP datagram to the provided destination address.
@@ -33,6 +84,11 @@ Net_Result _net_udp_send_to_addr(int                       fd,
                                  const void*               buffer,
                                  usize                     len)
 {
+    Net_Result wait_result = _net_udp_wait_fd(fd, POLLOUT, NET_WAIT_INFINITE);
+    if (NET_FAILED(wait_result)) {
+        return wait_result;
+    }
+
     ssize_t sent =
         sendto(fd, buffer, len, 0, (const struct sockaddr*)addr, sizeof(*addr));
     if (sent < 0) {
@@ -160,6 +216,12 @@ Net_Result _net_udp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 
 Net_Result _net_udp_send(Net_Socket* sock, const void* buffer, usize len)
 {
+    Net_Result wait_result = _net_udp_wait_fd(
+        sock->fd, POLLOUT, _net_socket_data(sock)->options.send_timeout_ms);
+    if (NET_FAILED(wait_result)) {
+        return wait_result;
+    }
+
     ssize_t sent = send(sock->fd, buffer, len, 0);
     if (sent < 0) {
         _net_log_error();
@@ -185,6 +247,12 @@ Net_Result _net_udp_send(Net_Socket* sock, const void* buffer, usize len)
 
 Net_Result _net_udp_recv_message(Net_Socket* sock)
 {
+    Net_Result wait_result = _net_udp_wait_fd(
+        sock->fd, POLLIN, _net_socket_data(sock)->options.recv_timeout_ms);
+    if (NET_FAILED(wait_result)) {
+        return wait_result;
+    }
+
     struct sockaddr_in route_addr;
     socklen_t          route_addr_len = sizeof(route_addr);
     ssize_t            packet_len     = recvfrom(sock->fd,

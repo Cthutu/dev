@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -59,6 +62,8 @@ BIN_DIR = ROOT / "_bin" / "tests"
 OBJ_DIR_BASE = ROOT / "_obj" / "tests"
 SCRIPT_PATH = Path(__file__).resolve()
 COMMON_PATH = BUILD_DIR / "common.py"
+TEST_LOCK_PATH = BUILD_DIR / ".test.lock"
+TEST_MODULE_TIMEOUT_MS = int(os.environ.get("TEST_MODULE_TIMEOUT_MS", "30000"))
 
 CC = os.environ.get("CC", "clang")
 LDFLAGS: list[str] = []
@@ -166,6 +171,58 @@ def section_break() -> None:
     print()
 
 
+@contextlib.contextmanager
+def test_run_lock() -> Any:
+    TEST_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TEST_LOCK_PATH.open("w") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            while True:
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                import msvcrt
+
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def terminate_test_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+
+    try:
+        if os.name != "nt":
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+        process.wait(timeout=1)
+    except Exception:
+        try:
+            if os.name != "nt":
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except Exception:
+            pass
+
+
 def run_test_binary(
     executable: Path,
     module_name: str,
@@ -176,12 +233,17 @@ def run_test_binary(
 ) -> ModuleResult:
     result = ModuleResult(name=module_name, executable=executable)
     cmd = [str(executable), *runner_args]
+    popen_kwargs: dict[str, Any] = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "bufsize": 1,
+    }
+    if os.name != "nt":
+        popen_kwargs["start_new_session"] = True
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
+        **popen_kwargs,
     )
 
     event_queue: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -197,10 +259,27 @@ def run_test_binary(
     active = 2
     completed_tests = 0
     expected_tests = 0
+    start_time = time.monotonic()
+    timed_out = False
     while active > 0 or not event_queue.empty():
         try:
             channel, line = event_queue.get(timeout=0.05)
         except queue.Empty:
+            if (time.monotonic() - start_time) * 1000 >= TEST_MODULE_TIMEOUT_MS:
+                timed_out = True
+                terminate_test_process(process)
+                result.failures.append(
+                    FailureEvent(
+                        category="runner",
+                        name=module_name,
+                        file=str(executable),
+                        line=0,
+                        expected=f"module completes within {TEST_MODULE_TIMEOUT_MS}ms",
+                        detail="module timed out and was terminated",
+                    )
+                )
+                active = 0
+                continue
             if (
                 process.poll() is not None
                 and not stdout_thread.is_alive()
@@ -263,11 +342,16 @@ def run_test_binary(
     stdout_thread.join()
     stderr_thread.join()
     result.exit_code = process.wait()
+    if timed_out:
+        result.total_tests = max(result.total_tests, expected_tests, 1)
+        result.failed_tests = max(result.failed_tests, 1)
     progress.update(
         module_task_id,
         total=max(expected_tests or completed_tests, 1),
         completed=max(expected_tests or completed_tests, 1),
-        description=fit_progress_label(f"{module_name} complete"),
+        description=fit_progress_label(
+            f"{module_name} timed out" if timed_out else f"{module_name} complete"
+        ),
     )
     progress.advance(overall_task_id, 1)
     progress.update(
@@ -367,215 +451,226 @@ def print_aggregate_summary(results: list[ModuleResult]) -> None:
 def main(argv: list[str] | None = None) -> None:
     argv = argv or sys.argv
     args = parse_args(argv)
+    with test_run_lock():
+        profile = "release" if args.release else "debug"
+        cflags = select_cflags(profile)
+        obj_dir = OBJ_DIR_BASE / profile
+        include_flags = ["-Isrc", "-Ibuild"]
 
-    profile = "release" if args.release else "debug"
-    cflags = select_cflags(profile)
-    obj_dir = OBJ_DIR_BASE / profile
-    include_flags = ["-Isrc", "-Ibuild"]
+        available_targets = {target.name: target for target in discover_test_targets()}
+        tests = select_tests(args.test_modules)
+        if not tests:
+            raise SystemExit(colour("No tests found in tests/", RED))
 
-    available_targets = {target.name: target for target in discover_test_targets()}
-    tests = select_tests(args.test_modules)
-    if not tests:
-        raise SystemExit(colour("No tests found in tests/", RED))
+        banner(profile, tests, "tests", CC)
 
-    banner(profile, tests, "tests", CC)
+        support_source = BUILD_DIR / "test.c"
+        root_defines: dict[Path, list[str]] = {}
+        root_libs: dict[Path, list[str]] = {}
+        sources_by_test: dict[str, list[Path]] = {}
+        libs_by_test: dict[str, list[str]] = {}
+        link_deps_by_test: dict[str, list[Path]] = {}
+        all_sources: list[Path] = [support_source]
 
-    support_source = BUILD_DIR / "test.c"
-    root_defines: dict[Path, list[str]] = {}
-    root_libs: dict[Path, list[str]] = {}
-    sources_by_test: dict[str, list[Path]] = {}
-    libs_by_test: dict[str, list[str]] = {}
-    link_deps_by_test: dict[str, list[Path]] = {}
-    all_sources: list[Path] = [support_source]
+        for test_name in tests:
+            target = available_targets[test_name]
+            target_sections: list[str] = []
+            for src in target.sources:
+                source_sections, defines, libs = parse_sections_and_defines(src, SRC_DIR)
+                root_defines[src] = defines
+                root_libs[src] = libs
+                for section in source_sections:
+                    if section not in target_sections:
+                        target_sections.append(section)
 
-    for test_name in tests:
-        target = available_targets[test_name]
-        target_sections: list[str] = []
-        for src in target.sources:
-            source_sections, defines, libs = parse_sections_and_defines(src, SRC_DIR)
-            root_defines[src] = defines
-            root_libs[src] = libs
-            for section in source_sections:
-                if section not in target_sections:
-                    target_sections.append(section)
-
-        ordered_libs: list[str] = []
-        for lib in [*libs_for_sections(expand_sections(target_sections, SRC_DIR), SRC_DIR)]:
-            if lib not in ordered_libs:
-                ordered_libs.append(lib)
-        for src in target.sources:
-            for lib in root_libs[src]:
+            ordered_libs: list[str] = []
+            for lib in [*libs_for_sections(expand_sections(target_sections, SRC_DIR), SRC_DIR)]:
                 if lib not in ordered_libs:
                     ordered_libs.append(lib)
-        libs_by_test[test_name] = ordered_libs
-        link_deps_by_test[test_name] = unique(
-            [*target.sources, *config_deps_for_sections(expand_sections(target_sections, SRC_DIR), SRC_DIR)]
-        )
-
-        dependency_sources = unique(
-            src
-            for section in expand_sections(target_sections, SRC_DIR)
-            for src in section_sources(section, SRC_DIR)
-        )
-        target_sources = unique([*target.sources, support_source, *dependency_sources])
-        sources_by_test[test_name] = target_sources
-        all_sources.extend(target_sources)
-
-    all_sources = unique(all_sources)
-
-    extra_flags_by_source: dict[Path, list[str]] = {}
-    header_deps_by_source: dict[Path, list[Path]] = {}
-    relative_roots: dict[Path, Path] = {}
-    local_build_roots: dict[Path, Path | None] = {}
-
-    for src in all_sources:
-        if src == support_source:
-            extra_flags_by_source[src] = ["-DTEST"]
-            header_deps_by_source[src] = [BUILD_DIR / "test.h"]
-            relative_roots[src] = ROOT
-            local_build_roots[src] = BUILD_DIR
-            continue
-
-        if src.is_relative_to(TESTS_DIR):
-            extra_flags_by_source[src] = [
-                "-DTEST",
-                *[f"-D{define}" for define in root_defines[src]],
-            ]
-            header_deps_by_source[src] = headers_for_source(src, TESTS_DIR, SRC_DIR)
-            relative_roots[src] = ROOT
-            local_build_roots[src] = TESTS_DIR
-            continue
-
-        defines = source_defines_for_dir(src.parent, SRC_DIR)
-        extra_flags_by_source[src] = ["-DTEST", *[f"-D{define}" for define in defines]]
-        header_deps_by_source[src] = headers_for_source(src, SRC_DIR, SRC_DIR)
-        relative_roots[src] = ROOT
-        local_build_roots[src] = SRC_DIR
-
-    compiled: dict[Path, Path] = {}
-    skipped_sources = 0
-    compile_work: dict[Path, bool] = {}
-    for src in all_sources:
-        obj = (obj_dir / src.relative_to(relative_roots[src])).with_suffix(".o")
-        compile_work[src] = needs_rebuild(
-            src,
-            obj,
-            header_deps=header_deps_by_source.get(src, []),
-            extra_deps=[SCRIPT_PATH, COMMON_PATH],
-            local_build_root=local_build_roots[src],
-        )
-        compiled[src] = obj
-        if not compile_work[src]:
-            skipped_sources += 1
-
-    executables: list[tuple[str, Path]] = []
-    link_work: dict[str, bool] = {}
-    for test_name in tests:
-        executable = executable_path(test_name, profile)
-        objects = [compiled[src] for src in sources_by_test[test_name]]
-        executables.append((test_name, executable))
-        link_work[test_name] = executable_needs_relink(
-            executable,
-            objects,
-            extra_deps=[SCRIPT_PATH, COMMON_PATH, *link_deps_by_test[test_name]],
-        )
-        if any(compile_work.get(src, False) for src in sources_by_test[test_name]):
-            link_work[test_name] = True
-
-    target_steps: dict[str, list[tuple[str, Path]]] = {}
-    seen_compile_steps: set[Path] = set()
-    for test_name in tests:
-        steps: list[tuple[str, Path]] = []
-        for src in sources_by_test[test_name]:
-            if compile_work.get(src) and src not in seen_compile_steps:
-                seen_compile_steps.add(src)
-                steps.append(("compile", src))
-        if link_work.get(test_name):
-            steps.append(("link", executable_path(test_name, profile)))
-        target_steps[test_name] = steps
-
-    with BuildProgressTracker(len(tests), noun="Test Modules") as tracker:
-        for test_name in tests:
-            steps = target_steps[test_name]
-            tracker.start_target(test_name, len(steps))
-            for kind, path in steps:
-                if kind == "compile":
-                    tracker.step(path.name)
-                    obj, _ = compile_source(
-                        cc=CC,
-                        cflags=cflags,
-                        include_flags=include_flags,
-                        obj_dir=obj_dir,
-                        src=path,
-                        relative_to=relative_roots[path],
-                        display_root=ROOT,
-                        extra_flags=extra_flags_by_source.get(path, []),
-                        header_deps=header_deps_by_source.get(path, []),
-                        extra_deps=[SCRIPT_PATH, COMMON_PATH],
-                        local_build_root=local_build_roots[path],
-                        announce=False,
-                    )
-                    compiled[path] = obj
-                else:
-                    tracker.step(path.name)
-                    objects = [compiled[src] for src in sources_by_test[test_name]]
-                    link_executable(
-                        cc=CC,
-                        ldflags=[*LDFLAGS, *[f"-l{lib}" for lib in libs_by_test[test_name]]],
-                        bin_dir=BIN_DIR,
-                        root=ROOT,
-                        objects=objects,
-                        executable=path,
-                        extra_deps=[SCRIPT_PATH, COMMON_PATH, *link_deps_by_test[test_name]],
-                        announce=False,
-                    )
-                tracker.advance_step()
-            tracker.finish_target(test_name, had_work=bool(steps))
-
-    print(f"{prefix('skip', GREY)} {skipped_sources} source file(s) up to date")
-
-    runner_args: list[str] = []
-    if args.test_filter:
-        runner_args = ["-t", args.test_filter]
-
-    results: list[ModuleResult] = []
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("{task.description}"),
-        BarColumn(bar_width=24),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        console=RICH_CONSOLE,
-        transient=True,
-    )
-    with progress:
-        overall_task_id = progress.add_task(
-            fit_progress_label("Modules"),
-            total=max(len(executables), 1),
-        )
-        module_task_id = progress.add_task(
-            fit_progress_label("Waiting"),
-            total=1,
-        )
-        for module_name, executable in executables:
-            results.append(
-                run_test_binary(
-                    executable,
-                    module_name,
-                    runner_args,
-                    progress,
-                    overall_task_id,
-                    module_task_id,
-                )
+            for src in target.sources:
+                for lib in root_libs[src]:
+                    if lib not in ordered_libs:
+                        ordered_libs.append(lib)
+            libs_by_test[test_name] = ordered_libs
+            link_deps_by_test[test_name] = unique(
+                [*target.sources, *config_deps_for_sections(expand_sections(target_sections, SRC_DIR), SRC_DIR)]
             )
 
-    print_module_table(results)
-    print_failures(results)
-    print_aggregate_summary(results)
+            dependency_sources = unique(
+                src
+                for section in expand_sections(target_sections, SRC_DIR)
+                for src in section_sources(section, SRC_DIR)
+            )
+            target_sources = unique([*target.sources, support_source, *dependency_sources])
+            sources_by_test[test_name] = target_sources
+            all_sources.extend(target_sources)
 
-    if any(result.exit_code != 0 for result in results):
-        raise SystemExit(1)
+        all_sources = unique(all_sources)
+
+        extra_flags_by_source: dict[Path, list[str]] = {}
+        header_deps_by_source: dict[Path, list[Path]] = {}
+        relative_roots: dict[Path, Path] = {}
+        local_build_roots: dict[Path, Path | None] = {}
+
+        for src in all_sources:
+            if src == support_source:
+                extra_flags_by_source[src] = ["-DTEST"]
+                header_deps_by_source[src] = [BUILD_DIR / "test.h"]
+                relative_roots[src] = ROOT
+                local_build_roots[src] = BUILD_DIR
+                continue
+
+            if src.is_relative_to(TESTS_DIR):
+                extra_flags_by_source[src] = [
+                    "-DTEST",
+                    *[f"-D{define}" for define in root_defines[src]],
+                ]
+                header_deps_by_source[src] = headers_for_source(src, TESTS_DIR, SRC_DIR)
+                relative_roots[src] = ROOT
+                local_build_roots[src] = TESTS_DIR
+                continue
+
+            defines = source_defines_for_dir(src.parent, SRC_DIR)
+            extra_flags_by_source[src] = ["-DTEST", *[f"-D{define}" for define in defines]]
+            header_deps_by_source[src] = headers_for_source(src, SRC_DIR, SRC_DIR)
+            relative_roots[src] = ROOT
+            local_build_roots[src] = SRC_DIR
+
+        compiled: dict[Path, Path] = {}
+        skipped_sources = 0
+        compile_work: dict[Path, bool] = {}
+        for src in all_sources:
+            obj = (obj_dir / src.relative_to(relative_roots[src])).with_suffix(".o")
+            compile_work[src] = needs_rebuild(
+                src,
+                obj,
+                header_deps=header_deps_by_source.get(src, []),
+                extra_deps=[SCRIPT_PATH, COMMON_PATH],
+                local_build_root=local_build_roots[src],
+            )
+            compiled[src] = obj
+            if not compile_work[src]:
+                skipped_sources += 1
+
+        executables: list[tuple[str, Path]] = []
+        link_work: dict[str, bool] = {}
+        for test_name in tests:
+            executable = executable_path(test_name, profile)
+            objects = [compiled[src] for src in sources_by_test[test_name]]
+            executables.append((test_name, executable))
+            link_work[test_name] = executable_needs_relink(
+                executable,
+                objects,
+                extra_deps=[SCRIPT_PATH, COMMON_PATH, *link_deps_by_test[test_name]],
+            )
+            if any(compile_work.get(src, False) for src in sources_by_test[test_name]):
+                link_work[test_name] = True
+
+        target_steps: dict[str, list[tuple[str, Path]]] = {}
+        seen_compile_steps: set[Path] = set()
+        for test_name in tests:
+            steps: list[tuple[str, Path]] = []
+            for src in sources_by_test[test_name]:
+                if compile_work.get(src) and src not in seen_compile_steps:
+                    seen_compile_steps.add(src)
+                    steps.append(("compile", src))
+            if link_work.get(test_name):
+                steps.append(("link", executable_path(test_name, profile)))
+            target_steps[test_name] = steps
+
+        with BuildProgressTracker(len(tests), noun="Test Modules") as tracker:
+            for test_name in tests:
+                steps = target_steps[test_name]
+                tracker.start_target(test_name, len(steps))
+                for kind, path in steps:
+                    if kind == "compile":
+                        tracker.step(path.name)
+                        obj, _ = compile_source(
+                            cc=CC,
+                            cflags=cflags,
+                            include_flags=include_flags,
+                            obj_dir=obj_dir,
+                            src=path,
+                            relative_to=relative_roots[path],
+                            display_root=ROOT,
+                            extra_flags=extra_flags_by_source.get(path, []),
+                            header_deps=header_deps_by_source.get(path, []),
+                            extra_deps=[SCRIPT_PATH, COMMON_PATH],
+                            local_build_root=local_build_roots[path],
+                            announce=False,
+                        )
+                        compiled[path] = obj
+                    else:
+                        tracker.step(path.name)
+                        objects = [compiled[src] for src in sources_by_test[test_name]]
+                        link_executable(
+                            cc=CC,
+                            ldflags=[*LDFLAGS, *[f"-l{lib}" for lib in libs_by_test[test_name]]],
+                            bin_dir=BIN_DIR,
+                            root=ROOT,
+                            objects=objects,
+                            executable=path,
+                            extra_deps=[SCRIPT_PATH, COMMON_PATH, *link_deps_by_test[test_name]],
+                            announce=False,
+                        )
+                    tracker.advance_step()
+                tracker.finish_target(test_name, had_work=bool(steps))
+
+        print(f"{prefix('skip', GREY)} {skipped_sources} source file(s) up to date")
+
+        runner_args: list[str] = []
+        if args.test_filter:
+            runner_args = ["-t", args.test_filter]
+
+        results: list[ModuleResult] = []
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            BarColumn(bar_width=24),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=RICH_CONSOLE,
+            transient=True,
+        )
+        with progress:
+            overall_task_id = progress.add_task(
+                fit_progress_label("Modules"),
+                total=max(len(executables), 1),
+            )
+            module_task_id = progress.add_task(
+                fit_progress_label("Waiting"),
+                total=1,
+            )
+            for module_name, executable in executables:
+                progress.update(
+                    overall_task_id,
+                    description=fit_progress_label(f"Modules (running {module_name})"),
+                )
+                progress.update(
+                    module_task_id,
+                    total=1,
+                    completed=0,
+                    visible=True,
+                    description=fit_progress_label(module_name),
+                )
+                results.append(
+                    run_test_binary(
+                        executable,
+                        module_name,
+                        runner_args,
+                        progress,
+                        overall_task_id,
+                        module_task_id,
+                    )
+                )
+
+        print_module_table(results)
+        print_failures(results)
+        print_aggregate_summary(results)
+
+        if any(result.exit_code != 0 for result in results):
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":
