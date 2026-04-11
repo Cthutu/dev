@@ -75,10 +75,14 @@ void _net_socket_set_ops(Net_Socket*             sock,
 
 Net_Socket net_socket(void)
 {
-    return (Net_Socket){
+    Net_Socket sock = (Net_Socket){
         .state = NET_STATE_DISCONNECTED,
         .fd    = -1,
+        .kind  = NET_KIND_MESSAGE,
     };
+
+    _net_socket_set_ops(&sock, NULL, &_net_message_pattern_ops);
+    return sock;
 }
 
 //------------------------------------------------------------------------------
@@ -96,6 +100,9 @@ void net_close(Net_Socket* sock)
     }
 
     _net_socket_clear_pending(sock);
+    if (sock->internal_data) {
+        sock->internal_data = mem_free(sock->internal_data, __FILE__, __LINE__);
+    }
     sock->state = NET_STATE_DISCONNECTED;
 }
 
