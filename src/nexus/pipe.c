@@ -89,6 +89,7 @@ void _net_pipe_close(Net_Pipe* pipe)
     if (pipe->kind == NET_PIPE_TCP && pipe->tcp.fd >= 0) {
         close(pipe->tcp.fd);
         pipe->tcp.fd = -1;
+        _net_telnet_state_done(&pipe->tcp.telnet);
     }
 
     pipe->closed = true;
@@ -133,6 +134,10 @@ Net_Result _net_pipe_send(Net_Pipe* pipe, const void* buffer, usize len)
 
     switch (pipe->kind) {
     case NET_PIPE_TCP:
+        if (pipe->owner->kind == NET_SOCKET_TELNET) {
+            return _net_tcp_send_text_fd(
+                pipe->owner, pipe->tcp.fd, buffer, len);
+        }
         return _net_tcp_send_framed_fd(pipe->tcp.fd, buffer, len);
     case NET_PIPE_UDP:
         return _net_udp_send_to_addr(

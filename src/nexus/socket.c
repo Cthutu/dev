@@ -129,6 +129,20 @@ Net_Socket net_reply_socket(void)
 }
 
 //------------------------------------------------------------------------------
+// net_telnet_socket
+//
+// Creates a telnet socket. The first telnet mode is line-oriented over TCP,
+// with each message representing one received or transmitted line.
+//------------------------------------------------------------------------------
+
+Net_Socket net_telnet_socket(void)
+{
+    Net_Socket sock = net_socket();
+    sock.kind       = NET_SOCKET_TELNET;
+    return sock;
+}
+
+//------------------------------------------------------------------------------
 // net_close
 //
 // Closes any open operating-system socket and releases any pending message data
@@ -146,6 +160,7 @@ void net_close(Net_Socket* sock)
 
     _net_socket_clear_pending(sock);
     if (sock->internal_data) {
+        _net_telnet_state_done(&_net_socket_data(sock)->telnet);
         sock->internal_data = mem_free(sock->internal_data, __FILE__, __LINE__);
     }
     sock->state = NET_STATE_DISCONNECTED;
@@ -379,6 +394,10 @@ Net_Result net_bind(Net_Socket* sock, cstr url)
         return NET_INVALID_URL;
     }
 
+    if (sock->kind == NET_SOCKET_TELNET && endpoint.proto != NET_PROTO_TCP) {
+        return NET_PROTOCOL_NOT_SUPPORTED;
+    }
+
     switch (endpoint.proto) {
     case NET_PROTO_TCP:
         return _net_tcp_bind(sock, &endpoint);
@@ -405,6 +424,10 @@ Net_Result net_connect(Net_Socket* sock, cstr url)
     Net_Endpoint endpoint;
     if (!_net_parse_url(url, &endpoint)) {
         return NET_INVALID_URL;
+    }
+
+    if (sock->kind == NET_SOCKET_TELNET && endpoint.proto != NET_PROTO_TCP) {
+        return NET_PROTOCOL_NOT_SUPPORTED;
     }
 
     switch (endpoint.proto) {

@@ -73,6 +73,7 @@ typedef enum : u8 {
     NET_SOCKET_BASIC,
     NET_SOCKET_REQUEST,
     NET_SOCKET_REPLY,
+    NET_SOCKET_TELNET,
 } Net_Socket_Kind;
 
 typedef enum {
@@ -126,6 +127,11 @@ Net_Socket net_request_socket(void);
 // Create a reply socket. Reply sockets must receive first, then send, and
 // continue alternating in that order.
 Net_Socket net_reply_socket(void);
+
+// Create a telnet socket. The initial telnet behaviour is line-oriented over
+// TCP: each received line becomes one message and each sent message is written
+// as one telnet line.
+Net_Socket net_telnet_socket(void);
 
 // Close the socket and free any private message-framing state.
 void net_close(Net_Socket* sock);

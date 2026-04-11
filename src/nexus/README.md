@@ -317,9 +317,10 @@ This module is still intentionally small. Some things are not there yet:
 
 - no host name lookup
 - no IPv6 URL handling
-- no public request/reply socket constructors yet
-- no telnet socket kind yet
-- no dedicated how-to guides yet
+- telnet is line-oriented only for now
+- no telnet character mode yet
+- no telnet size negotiation API yet
+- no public wait/poll API yet
 
 ## Related files
 
@@ -327,3 +328,5 @@ This module is still intentionally small. Some things are not there yet:
 - [PLAN.md](/home/matt/dev/src/nexus/PLAN.md)
 - [demo-client.c](/home/matt/dev/src/demo-client.c)
 - [demo-server.c](/home/matt/dev/src/demo-server.c)
+- [demo-repreq.c](/home/matt/dev/src/demo-repreq.c)
+- [demo-telnet.c](/home/matt/dev/src/demo-telnet.c)

@@ -30,6 +30,7 @@ The following work is now in place:
 - sender inspection via `Net_Message` metadata
 - multi-client TCP server support
 - request/reply socket kinds
+- telnet socket kind with line-oriented TCP behaviour
 - socket options for:
   - connect retry
   - connect timeout
@@ -38,40 +39,29 @@ The following work is now in place:
   - non-blocking mode
 - tests for Nexus behaviour in the shared test framework
 - overview and how-to documentation
+- telnet demo covering line echo and `q` shutdown
 
 The active remaining product work is now:
 
-- telnet-oriented socket behaviour
+- richer telnet behaviour
 - documentation beyond the overview README, especially how-to guides under
   `docs/how-to/nexus`
 
-## Next Milestone: Telnet
+## Next Milestone: Richer Telnet Support
 
-The next concrete implementation milestone should be a telnet socket and a
-small demo proving the basic flow.
+The first telnet milestone is now in place:
 
-### First telnet milestone
+- `net_telnet_socket`
+- `demo-telnet.c`
+- line-oriented telnet messages over TCP
+- simple telnet option rejection so line-mode clients can connect cleanly
 
-Implement:
+The next telnet work should build on that:
 
-- a `net_telnet_socket` constructor
-- a `demo-telnet.c` example that accepts a telnet client, reads incoming
-  lines, echoes them back, and closes the connection when the user sends `q`
-- line-oriented mode as the initial telnet behaviour
-
-The first telnet demo should be intentionally simple:
-
-- one connected telnet client at a time is enough
-- line-based input is enough
-- `q` is a demo command, not a built-in telnet-socket rule
-
-### Later telnet milestones
-
-After the first line-mode milestone, add:
-
-- character-oriented mode for interactive applications
+- character-oriented mode for interactive applications and MUD-style input
 - telnet state query helpers such as `net_telnet_size()`
 - terminal width and height tracking from telnet option negotiation
+- a dedicated telnet how-to document
 
 ## Current API Direction
 
