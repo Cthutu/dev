@@ -63,6 +63,7 @@ typedef struct {
 
 struct Net_MessageData {
     u8*       string_storage;
+    u8*       sender_url_storage;
     Net_Pipe* pipe;
 };
 

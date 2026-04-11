@@ -184,6 +184,13 @@ bool net_message_read_u16(Net_Message* msg, u16* out_value);
 bool net_message_read_u32(Net_Message* msg, u32* out_value);
 bool net_message_read_u64(Net_Message* msg, u64* out_value);
 
+// Inspect the hidden sender metadata attached to a received message. The id is
+// stable for the lifetime of the originating pipe. The URL reflects the
+// current sender address of that pipe. Both remain available after
+// `net_message_clear()` and are replaced on the next successful receive.
+bool net_message_id(Net_Message* msg, u64* out_id);
+bool net_message_url(Net_Message* msg, string* out_url);
+
 // Send one full message using the socket associated with the message object.
 // For TCP the payload is framed internally with a 4-byte length prefix. For
 // UDP the payload is sent as one datagram. Messages larger than

@@ -7,6 +7,8 @@
 #include <nexus/internal.h>
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <stdio.h>
 #include <sys/socket.h>
 
 //------------------------------------------------------------------------------
@@ -129,6 +131,10 @@ void net_message_done(Net_Message* msg)
     if (data && data->string_storage) {
         data->string_storage =
             mem_free(data->string_storage, __FILE__, __LINE__);
+    }
+    if (data && data->sender_url_storage) {
+        data->sender_url_storage =
+            mem_free(data->sender_url_storage, __FILE__, __LINE__);
     }
     if (data) {
         msg->internal_data = mem_free(msg->internal_data, __FILE__, __LINE__);
@@ -344,6 +350,93 @@ bool net_message_read_u64(Net_Message* msg, u64* out_value)
     }
 
     *out_value = _net_ntoh_u64(network_value);
+    return true;
+}
+
+//------------------------------------------------------------------------------
+// net_message_id
+//
+// Returns the stable pipe identifier attached to a received message.
+//------------------------------------------------------------------------------
+
+bool net_message_id(Net_Message* msg, u64* out_id)
+{
+    if (!msg || !out_id) {
+        return false;
+    }
+
+    Net_MessageData* data = msg->internal_data;
+    if (!data || !data->pipe) {
+        return false;
+    }
+
+    *out_id = data->pipe->id;
+    return true;
+}
+
+//------------------------------------------------------------------------------
+// net_message_url
+//
+// Formats the sender URL associated with a received message.
+//------------------------------------------------------------------------------
+
+bool net_message_url(Net_Message* msg, string* out_url)
+{
+    if (!msg || !out_url) {
+        return false;
+    }
+
+    Net_MessageData* data = msg->internal_data;
+    if (!data || !data->pipe) {
+        return false;
+    }
+
+    struct sockaddr_in addr   = {0};
+    cstr               scheme = NULL;
+
+    switch (data->pipe->kind) {
+    case NET_PIPE_TCP:
+        {
+            socklen_t addr_len = sizeof(addr);
+            if (getpeername(data->pipe->tcp.fd,
+                            (struct sockaddr*)&addr,
+                            &addr_len) < 0) {
+                return false;
+            }
+            scheme = "tcp";
+        }
+        break;
+
+    case NET_PIPE_UDP:
+        addr   = data->pipe->udp.addr;
+        scheme = "udp";
+        break;
+
+    default:
+        return false;
+    }
+
+    char ip_buffer[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &addr.sin_addr, ip_buffer, sizeof(ip_buffer))) {
+        return false;
+    }
+
+    char url_buffer[64];
+    int  written = snprintf(url_buffer,
+                           sizeof(url_buffer),
+                           "%s://%s:%u",
+                           scheme,
+                           ip_buffer,
+                           (unsigned)ntohs(addr.sin_port));
+    if (written < 0) {
+        return false;
+    }
+
+    usize url_len = (usize)written;
+    data->sender_url_storage =
+        mem_realloc(data->sender_url_storage, url_len, __FILE__, __LINE__);
+    memcpy(data->sender_url_storage, url_buffer, url_len);
+    *out_url = string_from(data->sender_url_storage, url_len);
     return true;
 }
 

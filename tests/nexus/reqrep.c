@@ -14,6 +14,12 @@ typedef struct {
     Net_Result bind_result;
     Net_Result recv_result;
     Net_Result send_result;
+    u64        sender_id;
+    char       sender_url[64];
+    usize      sender_url_len;
+    u64        sender_id_after_clear;
+    char       sender_url_after_clear[64];
+    usize      sender_url_after_clear_len;
     string     request_text;
     u32        request_id;
 } ReqRepServerArgs;
@@ -70,10 +76,24 @@ internal void* _nexus_reply_server_round_trip(void* arg)
     Net_Message msg   = net_message_create(&sock);
     args->recv_result = net_recv(&msg);
     if (args->recv_result == NET_OK) {
+        string sender_url;
+        TEST_ASSERT(net_message_id(&msg, &args->sender_id));
+        TEST_ASSERT(net_message_url(&msg, &sender_url));
+        TEST_ASSERT_LT(sender_url.count, sizeof(args->sender_url));
+        memcpy(args->sender_url, sender_url.data, sender_url.count);
+        args->sender_url[sender_url.count] = 0;
+        args->sender_url_len               = sender_url.count;
+
         TEST_ASSERT(net_message_read_string(&msg, &args->request_text));
         TEST_ASSERT(net_message_read_u32(&msg, &args->request_id));
 
         net_message_clear(&msg);
+        TEST_ASSERT(net_message_id(&msg, &args->sender_id_after_clear));
+        TEST_ASSERT(net_message_url(&msg, &sender_url));
+        TEST_ASSERT_LT(sender_url.count, sizeof(args->sender_url_after_clear));
+        memcpy(args->sender_url_after_clear, sender_url.data, sender_url.count);
+        args->sender_url_after_clear[sender_url.count] = 0;
+        args->sender_url_after_clear_len               = sender_url.count;
         net_message_append_string(&msg, S("reply"));
         net_message_append_u32(&msg, args->request_id + 1);
         args->send_result = net_send(&msg);
@@ -118,6 +138,14 @@ TEST_CASE(nexus, request_reply_round_trip_over_tcp)
     TEST_ASSERT_EQ(server_args.request_text.count, (usize)7);
     TEST_ASSERT_MEM_EQ(server_args.request_text.data, "request", 7);
     TEST_ASSERT_EQ(server_args.request_id, 41u);
+    TEST_ASSERT_EQ(server_args.sender_id_after_clear, server_args.sender_id);
+    TEST_ASSERT_EQ(server_args.sender_url_after_clear_len,
+                   server_args.sender_url_len);
+    TEST_ASSERT_MEM_EQ(server_args.sender_url_after_clear,
+                       server_args.sender_url,
+                       server_args.sender_url_len);
+    TEST_ASSERT_GT(server_args.sender_id, 0u);
+    TEST_ASSERT(server_args.sender_url_len > 0);
     TEST_ASSERT_EQ(reply_text.count, (usize)5);
     TEST_ASSERT_MEM_EQ(reply_text.data, "reply", 5);
     TEST_ASSERT_EQ(reply_id, 42u);

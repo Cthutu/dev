@@ -41,6 +41,15 @@ When a message is received from a bound socket, Nexus also keeps hidden routing
 information inside the message so `net_send(&message)` can reply back to the
 originating peer.
 
+You can inspect that sender information with:
+
+- `net_message_id(&message, &id)`
+- `net_message_url(&message, &url)`
+
+The sender id is stable for the lifetime of the originating pipe. Both the id
+and URL remain attached to the message after `net_message_clear()`, so reply
+code can confirm which request it is replying to.
+
 ### Simple socket lifecycle
 
 Typical usage is:
@@ -193,6 +202,13 @@ Strings are encoded as:
 - `net_message_read_u64`
 
 Reads are destructive: they consume bytes from the front of the message.
+
+### Sender helpers
+
+- `net_message_id`
+- `net_message_url`
+
+These inspect the hidden sender metadata attached by `net_recv()`.
 
 ## Socket options
 

@@ -27,6 +27,7 @@ The following work is now in place:
 - message-only public send/receive API
 - reusable `Net_Message` objects
 - hidden pipe-based reply routing
+- sender inspection via `Net_Message` metadata
 - multi-client TCP server support
 - socket options for:
   - connect retry
@@ -38,7 +39,6 @@ The following work is now in place:
 
 The active remaining product work is now:
 
-- request/reply socket kinds
 - telnet-oriented socket behaviour
 - documentation beyond the overview README, especially how-to guides under
   `docs/how-to/nexus`
@@ -841,6 +841,19 @@ That means:
 
 This preserves the simple public API while still allowing multi-client and
 multi-peer reply semantics later.
+
+That hidden metadata should also be inspectable through the public API so a
+server can identify the current sender while handling a request. The useful
+surface is:
+
+- `net_message_id`
+- `net_message_url`
+
+Those values should:
+
+- remain available after `net_message_clear`
+- stay stable for the lifetime of the originating pipe
+- be replaced on the next successful receive into that message
 
 ## Phase 4: Unified Pipe Model For Multi-Client TCP
 
