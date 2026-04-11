@@ -7,41 +7,47 @@
 #include <nexus/internal.h>
 
 #include <errno.h>
-#include <netinet/in.h>
 #include <unistd.h>
-#include <sys/socket.h>
 
 //------------------------------------------------------------------------------
 // net_socket
 //
-// This creates a socket ready to be bound or connected to.  Currently, we just
-// support basic streaming sockets.
+// Creates a new socket handle in the disconnected state. The handle itself is
+// just a small piece of local state until `net_bind` or `net_connect` attaches
+// it to an operating-system socket.
 //------------------------------------------------------------------------------
 
 Net_Socket net_socket(void)
 {
-    return (Net_Socket){.state = NET_STATE_DISCONNECTED, .fd = -1};
+    return (Net_Socket){
+        .state = NET_STATE_DISCONNECTED,
+        .fd    = -1,
+    };
 }
 
 //------------------------------------------------------------------------------
 // net_close
 //
-// Closes an open socket created previously by `net_socket`.
+// Closes any open operating-system socket and releases any pending message data
+// retained internally by Nexus.
 //------------------------------------------------------------------------------
 
 void net_close(Net_Socket* sock)
 {
     if (sock->fd >= 0) {
         close(sock->fd);
-        sock->fd    = -1;
-        sock->state = NET_STATE_DISCONNECTED;
+        sock->fd = -1;
     }
+
+    _net_socket_clear_pending(sock);
+    sock->state = NET_STATE_DISCONNECTED;
 }
 
 //------------------------------------------------------------------------------
 // net_result_string
 //
-// Converts a result code into a short readable string suitable for logging.
+// Converts a result code into a short readable string suitable for logging and
+// diagnostics.
 //------------------------------------------------------------------------------
 
 cstr net_result_string(Net_Result result)
@@ -65,6 +71,10 @@ cstr net_result_string(Net_Result result)
         return "socket busy";
     case NET_NOT_CONNECTED:
         return "not connected";
+    case NET_BUFFER_TOO_SMALL:
+        return "buffer too small";
+    case NET_BAD_MESSAGE:
+        return "bad message";
     case NET_CLOSED:
         return "connection closed";
     case NET_ERROR:
@@ -77,11 +87,11 @@ cstr net_result_string(Net_Result result)
 //------------------------------------------------------------------------------
 // _net_log_error
 //
-// Logs the last network error to the console.  This is intended to be called
-// after a network function fails to provide more information about the failure.
+// Logs the current network error in debug builds. Public APIs translate these
+// platform errors into the smaller `Net_Result` space.
 //------------------------------------------------------------------------------
 
-internal void _net_log_error(void)
+void _net_log_error(void)
 {
 #if DEBUG
     int err = errno;
@@ -92,14 +102,11 @@ internal void _net_log_error(void)
 //------------------------------------------------------------------------------
 // _net_create_socket
 //
-// Creates a socket file descriptor based on the provided endpoint information.
-// The socket is not bound or connected to anything, it's just created and
-// returned.
-//
-// Returns the socket file descriptor on success, or -1 on failure.
+// Creates a raw operating-system socket matching the endpoint protocol. The
+// returned file descriptor is not bound or connected yet.
 //------------------------------------------------------------------------------
 
-internal int _net_create_socket(Net_Endpoint* endpoint)
+int _net_create_socket(Net_Endpoint* endpoint)
 {
     int sock_type  = 0;
     int proto_type = 0;
@@ -113,330 +120,194 @@ internal int _net_create_socket(Net_Endpoint* endpoint)
         proto_type = IPPROTO_UDP;
         break;
     default:
-        return -1; // Invalid protocol
+        return -1;
     }
 
-    int fd = socket(AF_INET, sock_type, proto_type);
-    if (fd < 0) {
-        return -1; // Socket creation failed
+    return socket(AF_INET, sock_type, proto_type);
+}
+
+//------------------------------------------------------------------------------
+// _net_endpoint_to_addr
+//
+// Converts the parsed Nexus endpoint into a `sockaddr_in` ready for bind or
+// connect.
+//------------------------------------------------------------------------------
+
+void _net_endpoint_to_addr(Net_Endpoint* endpoint, struct sockaddr_in* out_addr)
+{
+    out_addr->sin_family = AF_INET;
+    out_addr->sin_port   = htons(endpoint->port);
+    memcpy(&out_addr->sin_addr, endpoint->ip, 4);
+}
+
+//------------------------------------------------------------------------------
+// _net_socket_clear_pending
+//
+// Releases any pending message retained by the socket. We keep pending messages
+// when the caller's receive buffer is too small and the message needs to remain
+// available for a retry.
+//------------------------------------------------------------------------------
+
+void _net_socket_clear_pending(Net_Socket* sock)
+{
+    if (sock->pending_message) {
+        sock->pending_message =
+            mem_free(sock->pending_message, __FILE__, __LINE__);
+    }
+    sock->pending_message_len      = 0;
+    sock->pending_message_capacity = 0;
+    sock->has_pending_message      = false;
+}
+
+//------------------------------------------------------------------------------
+// _net_socket_store_pending
+//
+// Copies a complete message into the socket's private pending buffer so later
+// `net_recv` calls can consume, retry, or drop it.
+//------------------------------------------------------------------------------
+
+void _net_socket_store_pending(Net_Socket* sock, const void* buffer, usize len)
+{
+    if (len > sock->pending_message_capacity) {
+        // Grow the retained buffer only when needed so repeated receives can
+        // reuse the same allocation.
+        sock->pending_message =
+            mem_realloc(sock->pending_message, len, __FILE__, __LINE__);
+        sock->pending_message_capacity = len;
     }
 
-    return fd;
+    if (len > 0) {
+        memcpy(sock->pending_message, buffer, len);
+    }
+
+    sock->pending_message_len = len;
+    sock->has_pending_message = true;
+}
+
+//------------------------------------------------------------------------------
+// _net_socket_consume_pending
+//
+// Copies the retained pending message into the caller buffer, or drops it when
+// the caller passes a null buffer. If the caller buffer is too small, the
+// message is left untouched for a later retry.
+//------------------------------------------------------------------------------
+
+Net_Result _net_socket_consume_pending(Net_Socket* sock,
+                                       void*       buffer,
+                                       usize       len,
+                                       usize*      out_recv_len)
+{
+    if (!sock->has_pending_message) {
+        return NET_NOT_CONNECTED;
+    }
+
+    if (out_recv_len) {
+        // Always report the full pending size so the caller can size a retry
+        // buffer correctly.
+        *out_recv_len = sock->pending_message_len;
+    }
+
+    if (!buffer) {
+        // A null buffer is the explicit "drop this pending message" signal.
+        sock->has_pending_message = false;
+        sock->pending_message_len = 0;
+        return NET_OK;
+    }
+
+    if (len < sock->pending_message_len) {
+        return NET_BUFFER_TOO_SMALL;
+    }
+
+    if (sock->pending_message_len > 0) {
+        memcpy(buffer, sock->pending_message, sock->pending_message_len);
+    }
+
+    sock->has_pending_message = false;
+    sock->pending_message_len = 0;
+    return NET_OK;
 }
 
 //------------------------------------------------------------------------------
 // net_bind
 //
-// Binds a socket to the provided URL.  The URL should be in the format
-// `<protocol>://<host>:<port>`, e.g. `tcp://127.0.0.1:8080`.
-//
-// On success, the socket is bound and ready to receive connections (if TCP) or
-// send/receive data (if UDP).  On failure, the socket is left unchanged and an
-// appropriate error code is returned.
+// Binds a socket to the provided URL. TCP sockets become simple server
+// endpoints that accept on the first receive; UDP sockets can receive
+// immediately after a successful bind.
 //------------------------------------------------------------------------------
 
-Net_Result net_bind(Net_Socket* out_sock, cstr url)
+Net_Result net_bind(Net_Socket* sock, cstr url)
 {
-    //
-    // Validate the socket is in a state where it can be bound
-    //
-
-    if (out_sock->state != NET_STATE_DISCONNECTED) {
-        return NET_SOCKET_BUSY; // Socket is already in use
+    if (sock->state != NET_STATE_DISCONNECTED) {
+        return NET_SOCKET_BUSY;
     }
-
-    //
-    // Process the URL
-    //
 
     Net_Endpoint endpoint;
     if (!_net_parse_url(url, &endpoint)) {
         return NET_INVALID_URL;
     }
 
-    //
-    // Create a socket compatible with the URL
-    //
-
-    int fd = _net_create_socket(&endpoint);
-    if (fd < 0) {
-        _net_log_error();
-        switch (errno) {
-        case EMFILE:
-        case ENFILE:
-            return NET_OUT_OF_FD;
-
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-
-        case EPROTONOSUPPORT:
-            return NET_PROTOCOL_NOT_SUPPORTED;
-
-        default:
-            return NET_ERROR;
-        }
+    switch (endpoint.proto) {
+    case NET_PROTO_TCP:
+        return _net_tcp_bind(sock, &endpoint);
+    case NET_PROTO_UDP:
+        return _net_udp_bind(sock, &endpoint);
+    default:
+        return NET_PROTOCOL_NOT_SUPPORTED;
     }
-
-    out_sock->fd    = fd;
-    out_sock->proto = endpoint.proto;
-
-    //
-    // Set up the socket address
-    //
-
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(endpoint.port);
-    memcpy(&addr.sin_addr, endpoint.ip, 4); // IPv4-mapped IPv
-
-    //
-    // Bind the socket to the IP address
-    //
-
-    int result = bind(fd, (struct sockaddr*)&addr, sizeof(addr));
-    if (result < 0) {
-        close(fd);
-        out_sock->fd = -1;
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EACCES:
-            return NET_ACCESS_DENIED;
-        case EADDRINUSE:
-            return NET_PORT_IN_USE;
-        default:
-            return NET_ERROR;
-        }
-    }
-
-    //
-    if (endpoint.proto == NET_PROTO_TCP) {
-        //
-        // Start listening on it
-        //
-
-        if (listen(fd, SOMAXCONN) < 0) {
-            close(fd);
-            out_sock->fd = -1;
-            return NET_ERROR;
-        }
-
-        // Signify that on the next time we try to receive, we need to accept a
-        // connection.
-        out_sock->state = NET_STATE_WAITING_CONNECTION;
-    } else {
-        // UDP is connectionless, so a bound socket can receive immediately.
-        out_sock->state = NET_STATE_CONNECTED;
-    }
-    return NET_OK;
-}
-
-//------------------------------------------------------------------------------
-// net_send
-//
-// Sends data over a connected socket. For TCP, this loops until the full
-// buffer is written or an error occurs. For UDP, the send is a single datagram
-// send to the connected peer.
-//------------------------------------------------------------------------------
-
-Net_Result net_send(Net_Socket* sock, const void* buffer, usize len)
-{
-    if (sock->state != NET_STATE_CONNECTED) {
-        return NET_NOT_CONNECTED;
-    }
-
-    const u8* data = buffer;
-    usize     sent = 0;
-    int       flags = 0;
-
-#if defined(MSG_NOSIGNAL)
-    flags |= MSG_NOSIGNAL;
-#endif
-
-    while (sent < len) {
-        ssize_t result = send(sock->fd, data + sent, len - sent, flags);
-        if (result < 0) {
-            _net_log_error();
-            switch (errno) {
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            case EPIPE:
-            case ECONNRESET:
-                return NET_CLOSED;
-            default:
-                return NET_ERROR;
-            }
-        }
-
-        if (result == 0) {
-            return NET_CLOSED;
-        }
-
-        sent += (usize)result;
-
-        if (sock->proto == NET_PROTO_UDP) {
-            break;
-        }
-    }
-
-    return sent == len ? NET_OK : NET_ERROR;
 }
 
 //------------------------------------------------------------------------------
 // net_connect
 //
-// Connects a socket to the provided URL.  The URL should be in the format
-// `<protocol>://<host>:<port>`, e.g. `tcp://127.0.0.1:8080`. On success, the
-// socket is connected and ready to send/receive data.  On failure the socket is
-// left unchanged and an appropriate error code is returned.
-//
-// Note that for TCP, this will attempt to connect to the server at the provided
-// URL.  For UDP, this will just set the default destination for send/recv calls
-// to the provided URL (UDP is connectionless, so this doesn't actually
-// establish a connection, it just sets the default peer address).
+// Connects a socket to the provided URL. For UDP this records the default peer
+// so the message pattern can continue to use the same send/receive interface.
 //------------------------------------------------------------------------------
 
-Net_Result net_connect(Net_Socket* out_sock, cstr url)
+Net_Result net_connect(Net_Socket* sock, cstr url)
 {
-    //
-    // Validate the socket is in a state where it can be connected
-    //
-
-    if (out_sock->state != NET_STATE_DISCONNECTED) {
-        return NET_SOCKET_BUSY; // Socket is already in use
+    if (sock->state != NET_STATE_DISCONNECTED) {
+        return NET_SOCKET_BUSY;
     }
-
-    //
-    // Process the URL
-    //
 
     Net_Endpoint endpoint;
     if (!_net_parse_url(url, &endpoint)) {
         return NET_INVALID_URL;
     }
 
-    //
-    // Create a socket compatible with the URL
-    //
-
-    int fd = _net_create_socket(&endpoint);
-    if (fd < 0) {
-        _net_log_error();
-        switch (errno) {
-        case EMFILE:
-        case ENFILE:
-            return NET_OUT_OF_FD;
-
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-
-        case EPROTONOSUPPORT:
-            return NET_PROTOCOL_NOT_SUPPORTED;
-
-        default:
-            return NET_ERROR;
-        }
+    switch (endpoint.proto) {
+    case NET_PROTO_TCP:
+        return _net_tcp_connect(sock, &endpoint);
+    case NET_PROTO_UDP:
+        return _net_udp_connect(sock, &endpoint);
+    default:
+        return NET_PROTOCOL_NOT_SUPPORTED;
     }
+}
 
-    out_sock->fd    = fd;
-    out_sock->proto = endpoint.proto;
+//------------------------------------------------------------------------------
+// net_send
+//
+// Sends one message using the default message pattern for the socket. Transport
+// details such as TCP framing are handled below this API layer.
+//------------------------------------------------------------------------------
 
-    //
-    // Set up the socket address
-    //
-
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(endpoint.port);
-    memcpy(&addr.sin_addr, endpoint.ip, 4); // IPv4-mapped IPv
-
-    //
-    // Connect the socket to the server
-    //
-
-    int result = connect(fd, (struct sockaddr*)&addr, sizeof(addr));
-    if (result < 0) {
-        close(fd);
-        out_sock->fd = -1;
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EACCES:
-            return NET_ACCESS_DENIED;
-        case EADDRINUSE:
-            return NET_PORT_IN_USE;
-        default:
-            return NET_ERROR;
-        }
-    }
-
-    out_sock->state = NET_STATE_CONNECTED;
-    return NET_OK;
+Net_Result net_send(Net_Socket* sock, const void* buffer, usize len)
+{
+    return _net_message_send(sock, buffer, len);
 }
 
 //------------------------------------------------------------------------------
 // net_recv
 //
-// Receives data from the socket. If the socket is waiting for an incoming TCP
-// connection, this will accept one first and then receive from it. On success,
-// the received data is written to the provided buffer and the number of bytes
-// received is written to `out_recv_len`. On failure, the socket is left
-// unchanged and an appropriate error code is returned.
+// Receives one message using the default message pattern for the socket. If a
+// previous receive left a message pending, this call consumes or drops that
+// retained message before touching the network again.
 //------------------------------------------------------------------------------
 
 Net_Result
-net_recv(Net_Socket* sock, void* buffer, usize buffer_len, usize* out_recv_len)
+net_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len)
 {
-    if (sock->state == NET_STATE_WAITING_CONNECTION) {
-        if (sock->proto == NET_PROTO_TCP) {
-            int listen_fd = sock->fd;
-            int client_fd = accept(sock->fd, NULL, NULL);
-            if (client_fd < 0) {
-                _net_log_error();
-                switch (errno) {
-                case EMFILE:
-                case ENFILE:
-                    return NET_OUT_OF_FD;
-                case ENETDOWN:
-                    return NET_NO_NETWORK;
-                default:
-                    return NET_ERROR;
-                }
-            }
-
-            // This preserves the minimal one-socket API: the listener becomes
-            // the accepted client after the first receive.
-            close(listen_fd);
-            sock->fd = client_fd;
-        }
-        sock->state = NET_STATE_CONNECTED;
-    }
-
-    if (sock->state != NET_STATE_CONNECTED) {
-        return NET_NOT_CONNECTED;
-    }
-
-    ssize_t recv_len = recv(sock->fd, buffer, buffer_len, 0);
-    if (recv_len < 0) {
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        default:
-            return NET_ERROR;
-        }
-    }
-
-    if (recv_len == 0) {
-        return NET_CLOSED;
-    }
-
-    if (out_recv_len) {
-        *out_recv_len = (usize)recv_len;
-    }
-    return NET_OK;
+    return _net_message_recv(sock, buffer, len, out_recv_len);
 }
 
 //------------------------------------------------------------------------------
