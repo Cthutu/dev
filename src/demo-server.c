@@ -27,13 +27,20 @@ int run(int argc, char* argv[])
     usize recv_len;
 
     prn("Waiting for incoming messages...");
-    result = net_recv(&sock, buffer, sizeof(buffer), &recv_len);
+    Net_Message msg = net_message_create(&sock);
+
+    result          = net_recv_msg(&msg);
     if (NET_FAILED(result)) {
         kill("Failed to receive data: %s", net_result_string(result));
     }
 
-    string msg = string_from(buffer, recv_len);
-    prn("Received message: " STRINGP, STRINGV(msg));
+    string text_msg;
+    if (!net_message_read_string(&msg, &text_msg)) {
+        kill("Failed to read message");
+    }
+
+    prn("Received message: " STRINGP, STRINGV(text_msg));
+    net_message_done(&msg);
 
     net_close(&sock);
 
