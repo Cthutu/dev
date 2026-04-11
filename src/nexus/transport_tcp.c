@@ -501,18 +501,20 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 
         int connect_error = errno;
         close(fd);
-        _net_log_error();
 
         switch (connect_error) {
         case ENETDOWN:
+            _net_log_error();
             return NET_NO_NETWORK;
         case EACCES:
+            _net_log_error();
             return NET_ACCESS_DENIED;
         default:
             break;
         }
 
         if (!_net_tcp_should_retry_connect(connect_error)) {
+            _net_log_error();
             return NET_ERROR;
         }
 

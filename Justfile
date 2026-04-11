@@ -40,7 +40,7 @@ alias rr := run-release
 alias c := clean
 
 test-network:
-    just run demo-server &
-    sleep 0.2
-    just run demo-client
+    just build demo-client demo-server
+    just run demo-client &
+    just run demo-server
     wait

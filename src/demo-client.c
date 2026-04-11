@@ -26,8 +26,19 @@ int run(int argc, char* argv[])
         string message =
             string_from((u8*)message_buffer, strlen(message_buffer));
 
-        Net_Socket sock   = net_socket();
-        Net_Result result = net_connect(&sock, url);
+        Net_Socket sock = net_socket();
+        Net_Result result =
+            net_set_option(&sock, NET_OPT_CONNECT_TIMEOUT_MS, 2000);
+        if (NET_FAILED(result)) {
+            kill("Failed to set connect timeout: %s",
+                 net_result_string(result));
+        }
+        result = net_set_option(&sock, NET_OPT_RECONNECT_INTERVAL_MS, 25);
+        if (NET_FAILED(result)) {
+            kill("Failed to set reconnect interval: %s",
+                 net_result_string(result));
+        }
+        result = net_connect(&sock, url);
         if (NET_FAILED(result)) {
             kill("Failed to connect to server: %s", net_result_string(result));
         }
