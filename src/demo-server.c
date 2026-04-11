@@ -13,11 +13,12 @@ int run(int argc, char* argv[])
     UNUSED(argv);
     prn("Demo server running...");
 
-    cstr url        = "tcp://127.0.0.1:8080";
+    cstr url          = "tcp://127.0.0.1:8080";
 
-    Net_Socket sock = net_socket();
-    if (NET_FAILED(net_bind(&sock, url))) {
-        kill("Failed to create binding");
+    Net_Socket sock   = net_socket();
+    Net_Result result = net_bind(&sock, url);
+    if (NET_FAILED(result)) {
+        kill("Failed to create binding: %s", net_result_string(result));
     }
 
     prn("Bound to %s", url);
@@ -26,8 +27,9 @@ int run(int argc, char* argv[])
     usize recv_len;
 
     prn("Waiting for incoming messages...");
-    if (NET_FAILED(net_recv(&sock, buffer, sizeof(buffer), &recv_len))) {
-        kill("Failed to receive data");
+    result = net_recv(&sock, buffer, sizeof(buffer), &recv_len);
+    if (NET_FAILED(result)) {
+        kill("Failed to receive data: %s", net_result_string(result));
     }
 
     string msg = string_from(buffer, recv_len);

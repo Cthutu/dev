@@ -16,16 +16,18 @@ int run(int argc, char* argv[])
     cstr   url      = "tcp://127.0.0.1:8080";
     string message  = S("Hello from the client!");
 
-    Net_Socket sock = net_socket();
-    if (NET_FAILED(net_connect(&sock, url))) {
-        kill("Failed to connect to server");
+    Net_Socket sock   = net_socket();
+    Net_Result result = net_connect(&sock, url);
+    if (NET_FAILED(result)) {
+        kill("Failed to connect to server: %s", net_result_string(result));
     }
 
     prn("Connected to %s", url);
     prn("Sending message: " STRINGP, STRINGV(message));
 
-    if (NET_FAILED(net_send(&sock, message.data, message.count))) {
-        kill("Failed to send data");
+    result = net_send(&sock, message.data, message.count);
+    if (NET_FAILED(result)) {
+        kill("Failed to send data: %s", net_result_string(result));
     }
 
     net_close(&sock);
