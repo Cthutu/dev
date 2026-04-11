@@ -11,6 +11,7 @@
 
 typedef struct {
     char       url[64];
+    string     expected_request_text;
     Net_Result bind_result;
     Net_Result recv_result;
     Net_Result send_result;
@@ -20,7 +21,6 @@ typedef struct {
     u64        sender_id_after_clear;
     char       sender_url_after_clear[64];
     usize      sender_url_after_clear_len;
-    string     request_text;
     u32        request_id;
 } ReqRepServerArgs;
 
@@ -84,7 +84,12 @@ internal void* _nexus_reply_server_round_trip(void* arg)
         args->sender_url[sender_url.count] = 0;
         args->sender_url_len               = sender_url.count;
 
-        TEST_ASSERT(net_message_read_string(&msg, &args->request_text));
+        string request_text;
+        TEST_ASSERT(net_message_read_string(&msg, &request_text));
+        TEST_ASSERT_EQ(request_text.count, args->expected_request_text.count);
+        TEST_ASSERT_MEM_EQ(request_text.data,
+                           args->expected_request_text.data,
+                           args->expected_request_text.count);
         TEST_ASSERT(net_message_read_u32(&msg, &args->request_id));
 
         net_message_clear(&msg);
@@ -106,7 +111,9 @@ internal void* _nexus_reply_server_round_trip(void* arg)
 
 TEST_CASE(nexus, request_reply_round_trip_over_tcp)
 {
-    ReqRepServerArgs server_args = {0};
+    ReqRepServerArgs server_args = {
+        .expected_request_text = S("request"),
+    };
     _nexus_make_reqrep_test_url(server_args.url, sizeof(server_args.url));
 
     Thread server_thread;
@@ -135,8 +142,6 @@ TEST_CASE(nexus, request_reply_round_trip_over_tcp)
     TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
     TEST_ASSERT_EQ(server_args.recv_result, NET_OK);
     TEST_ASSERT_EQ(server_args.send_result, NET_OK);
-    TEST_ASSERT_EQ(server_args.request_text.count, (usize)7);
-    TEST_ASSERT_MEM_EQ(server_args.request_text.data, "request", 7);
     TEST_ASSERT_EQ(server_args.request_id, 41u);
     TEST_ASSERT_EQ(server_args.sender_id_after_clear, server_args.sender_id);
     TEST_ASSERT_EQ(server_args.sender_url_after_clear_len,
@@ -178,7 +183,9 @@ TEST_CASE(nexus, request_socket_cannot_send_twice_without_reply)
 {
     Net_Socket sock              = net_request_socket();
 
-    ReqRepServerArgs server_args = {0};
+    ReqRepServerArgs server_args = {
+        .expected_request_text = S("one"),
+    };
     _nexus_make_reqrep_test_url(server_args.url, sizeof(server_args.url));
 
     Thread server_thread;

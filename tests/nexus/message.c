@@ -14,7 +14,6 @@ typedef struct {
     Net_Result bind_result;
     Net_Result recv_result;
     Net_Result send_result;
-    string     received_string;
     u16        received_u16;
     u32        received_u32;
     u64        received_u64;
@@ -28,7 +27,6 @@ typedef struct {
     Net_Result bind_result;
     Net_Result recv_result;
     Net_Result send_result;
-    string     received_string;
 } UdpMessageServerArgs;
 
 typedef struct {
@@ -48,7 +46,6 @@ typedef struct {
     Net_Result bind_result;
     Net_Result recv_results[2];
     Net_Result send_results[2];
-    string     received_texts[2];
     u32        received_ids[2];
 } MultiClientServerArgs;
 
@@ -57,7 +54,6 @@ typedef struct {
     u32        bind_delay_ms;
     Net_Result bind_result;
     Net_Result recv_result;
-    string     received_string;
 } DelayedBindServerArgs;
 
 typedef struct {
@@ -68,7 +64,6 @@ typedef struct {
     Net_Result bind_result;
     Net_Result recv_result;
     usize      recv_elapsed_ms;
-    string     received_string;
 } RecvTimeoutArgs;
 
 typedef struct {
@@ -139,7 +134,10 @@ internal void* _nexus_message_server_round_trip(void* arg)
         return NULL;
     }
 
-    TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
+    string received_string;
+    TEST_ASSERT(net_message_read_string(&msg, &received_string));
+    TEST_ASSERT_EQ(received_string.count, (usize)7);
+    TEST_ASSERT_MEM_EQ(received_string.data, "request", 7);
     TEST_ASSERT(net_message_read_u16(&msg, &args->received_u16));
     TEST_ASSERT(net_message_read_u32(&msg, &args->received_u32));
     TEST_ASSERT(net_message_read_u64(&msg, &args->received_u64));
@@ -180,7 +178,10 @@ internal void* _nexus_udp_message_server_round_trip(void* arg)
         return NULL;
     }
 
-    TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
+    string received_string;
+    TEST_ASSERT(net_message_read_string(&msg, &received_string));
+    TEST_ASSERT_EQ(received_string.count, (usize)11);
+    TEST_ASSERT_MEM_EQ(received_string.data, "udp-request", 11);
 
     net_message_clear(&msg);
     net_message_append_string(&msg, S("udp-reply"));
@@ -211,11 +212,21 @@ internal void* _nexus_multi_client_server_round_trip(void* arg)
             break;
         }
 
-        TEST_ASSERT(net_message_read_string(&msg, &args->received_texts[i]));
+        string received_text;
+        TEST_ASSERT(net_message_read_string(&msg, &received_text));
         TEST_ASSERT(net_message_read_u32(&msg, &args->received_ids[i]));
+        if (args->received_ids[i] == 101u) {
+            TEST_ASSERT_EQ(received_text.count, (usize)8);
+            TEST_ASSERT_MEM_EQ(received_text.data, "client-a", 8);
+        } else if (args->received_ids[i] == 202u) {
+            TEST_ASSERT_EQ(received_text.count, (usize)8);
+            TEST_ASSERT_MEM_EQ(received_text.data, "client-b", 8);
+        } else {
+            TEST_ASSERT(false);
+        }
 
         net_message_clear(&msg);
-        net_message_append_string(&msg, args->received_texts[i]);
+        net_message_append_string(&msg, received_text);
         net_message_append_u32(&msg, args->received_ids[i]);
         args->send_results[i] = net_send(&msg);
         if (NET_FAILED(args->send_results[i])) {
@@ -287,7 +298,10 @@ internal void* _nexus_delayed_bind_server(void* arg)
     Net_Message msg   = net_message_create(&sock);
     args->recv_result = net_recv(&msg);
     if (args->recv_result == NET_OK) {
-        TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
+        string received_string;
+        TEST_ASSERT(net_message_read_string(&msg, &received_string));
+        TEST_ASSERT_EQ(received_string.count, (usize)15);
+        TEST_ASSERT_MEM_EQ(received_string.data, "delayed-connect", 15);
     }
 
     net_message_done(&msg);
@@ -315,7 +329,10 @@ internal void* _nexus_recv_timeout_server(void* arg)
     args->recv_elapsed_ms =
         (usize)time_duration_to_ms(time_elapsed(start, time_now()));
     if (args->recv_result == NET_OK) {
-        TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
+        string received_string;
+        TEST_ASSERT(net_message_read_string(&msg, &received_string));
+        TEST_ASSERT_EQ(received_string.count, (usize)12);
+        TEST_ASSERT_MEM_EQ(received_string.data, "delayed-send", 12);
     }
 
     net_message_done(&msg);
@@ -448,8 +465,6 @@ TEST_CASE(nexus, recv_msg_and_send_msg_round_trip)
     TEST_ASSERT_EQ(args.bind_result, NET_OK);
     TEST_ASSERT_EQ(args.recv_result, NET_OK);
     TEST_ASSERT_EQ(args.send_result, NET_OK);
-    TEST_ASSERT_EQ(args.received_string.count, (usize)7);
-    TEST_ASSERT_MEM_EQ(args.received_string.data, "request", 7);
     TEST_ASSERT_EQ(args.received_u16, 0x1234);
     TEST_ASSERT_EQ(args.received_u32, 0x55667788u);
     TEST_ASSERT_EQ(args.received_u64, 0x0102030405060708ull);
@@ -495,8 +510,6 @@ TEST_CASE(nexus, udp_recv_msg_preserves_reply_route_for_send_msg)
     TEST_ASSERT_EQ(args.bind_result, NET_OK);
     TEST_ASSERT_EQ(args.recv_result, NET_OK);
     TEST_ASSERT_EQ(args.send_result, NET_OK);
-    TEST_ASSERT_EQ(args.received_string.count, (usize)11);
-    TEST_ASSERT_MEM_EQ(args.received_string.data, "udp-request", 11);
     TEST_ASSERT_EQ(reply_text.count, (usize)9);
     TEST_ASSERT_MEM_EQ(reply_text.data, "udp-reply", 9);
 
@@ -624,8 +637,6 @@ TEST_CASE(nexus, connect_can_retry_until_server_binds)
 
     TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
     TEST_ASSERT_EQ(server_args.recv_result, NET_OK);
-    TEST_ASSERT_EQ(server_args.received_string.count, (usize)15);
-    TEST_ASSERT_MEM_EQ(server_args.received_string.data, "delayed-connect", 15);
 }
 
 TEST_CASE(nexus, connect_times_out_when_server_never_binds)
@@ -712,8 +723,6 @@ TEST_CASE(nexus, recv_succeeds_when_message_arrives_before_timeout)
 
     TEST_ASSERT_EQ(args.bind_result, NET_OK);
     TEST_ASSERT_EQ(args.recv_result, NET_OK);
-    TEST_ASSERT_EQ(args.received_string.count, (usize)12);
-    TEST_ASSERT_MEM_EQ(args.received_string.data, "delayed-send", 12);
 }
 
 TEST_CASE(nexus, nonblocking_connect_returns_would_block_when_server_is_absent)
