@@ -364,7 +364,12 @@ Net_Result net_connect(Net_Socket* sock, cstr url)
 
 Net_Result net_send(Net_Socket* sock, const void* buffer, usize len)
 {
-    return _net_message_send(sock, buffer, len);
+    Net_SocketData* data = _net_socket_data(sock);
+    if (!data || !data->pattern_ops || !data->pattern_ops->send) {
+        return NET_NOT_CONNECTED;
+    }
+
+    return data->pattern_ops->send(sock, buffer, len);
 }
 
 //------------------------------------------------------------------------------
@@ -378,7 +383,12 @@ Net_Result net_send(Net_Socket* sock, const void* buffer, usize len)
 Net_Result
 net_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len)
 {
-    return _net_message_recv(sock, buffer, len, out_recv_len);
+    Net_SocketData* data = _net_socket_data(sock);
+    if (!data || !data->pattern_ops || !data->pattern_ops->recv) {
+        return NET_NOT_CONNECTED;
+    }
+
+    return data->pattern_ops->recv(sock, buffer, len, out_recv_len);
 }
 
 //------------------------------------------------------------------------------
