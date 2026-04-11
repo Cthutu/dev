@@ -29,6 +29,7 @@ The following work is now in place:
 - hidden pipe-based reply routing
 - sender inspection via `Net_Message` metadata
 - multi-client TCP server support
+- request/reply socket kinds
 - socket options for:
   - connect retry
   - connect timeout
@@ -36,12 +37,63 @@ The following work is now in place:
   - receive timeout
   - non-blocking mode
 - tests for Nexus behaviour in the shared test framework
+- overview and how-to documentation
 
 The active remaining product work is now:
 
 - telnet-oriented socket behaviour
 - documentation beyond the overview README, especially how-to guides under
   `docs/how-to/nexus`
+
+## Next Milestone: Telnet
+
+The next concrete implementation milestone should be a telnet socket and a
+small demo proving the basic flow.
+
+### First telnet milestone
+
+Implement:
+
+- a `net_telnet_socket` constructor
+- a `demo-telnet.c` example that accepts a telnet client, reads incoming
+  lines, echoes them back, and closes the connection when the user sends `q`
+- line-oriented mode as the initial telnet behaviour
+
+The first telnet demo should be intentionally simple:
+
+- one connected telnet client at a time is enough
+- line-based input is enough
+- `q` is a demo command, not a built-in telnet-socket rule
+
+### Later telnet milestones
+
+After the first line-mode milestone, add:
+
+- character-oriented mode for interactive applications
+- telnet state query helpers such as `net_telnet_size()`
+- terminal width and height tracking from telnet option negotiation
+
+## Current API Direction
+
+Nexus now has three public socket directions:
+
+- `net_socket`
+  - flexible message transport without enforced ordering
+- `net_request_socket`
+  - send, then receive, repeating
+- `net_reply_socket`
+  - receive, then send, repeating
+
+The next public constructor should be:
+
+- `net_telnet_socket`
+
+## Notes On This Plan
+
+The rest of this document records the design path that led to the current
+implementation. Some older sections still describe work that is already done.
+Those sections are kept as design history and rationale, but the sections
+above are the authoritative view of the current roadmap.
 
 Older sections below record the design path that got the module here. Where
 they disagree with the current implementation, the implementation wins.
@@ -304,6 +356,20 @@ Planned behaviour:
   - UDP with datagrams
 
 Request/reply is now the next active implementation step.
+
+Telnet should be the next specialised socket kind after request/reply.
+The first useful telnet milestone should be:
+
+- line-based input from a telnet client
+- line echo / response behaviour
+- a small `demo-telnet.c` proving the socket kind end to end
+
+Later telnet milestones should include:
+
+- character-based mode
+- telnet size negotiation support
+- a query such as `net_telnet_size()` returning the current console width and
+  height based on telnet option negotiation
 
 The important architectural point is that these constructors choose pattern
 behaviour first, and transport support second.
