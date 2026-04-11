@@ -41,6 +41,9 @@ Net_Pipe* _net_pipe_create_tcp(Net_Socket* sock, int fd)
 {
     Net_Pipe* pipe = _net_pipe_alloc(sock, NET_PIPE_TCP);
     pipe->tcp.fd   = fd;
+    if (sock->kind == NET_SOCKET_TELNET) {
+        pipe->tcp.telnet.mode = _net_telnet_socket_data(sock)->telnet.mode;
+    }
     return pipe;
 }
 

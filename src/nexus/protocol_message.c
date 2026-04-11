@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------------
-// Message pattern
+// Message protocol
 //
 // Copyright (C)2026 Matt Davies, all rights reserved
 //------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ internal Net_Pipe* _net_message_pipe(Net_Message* msg)
 //------------------------------------------------------------------------------
 // _net_message_send
 //
-// Implements the default message-pattern send path. This layer is responsible
+// Implements the default message-protocol send path. This layer is responsible
 // for message-sized validation and dispatching to the active transport.
 //------------------------------------------------------------------------------
 
@@ -57,7 +57,7 @@ Net_Result _net_message_send(Net_Message* msg)
 //------------------------------------------------------------------------------
 // _net_message_recv
 //
-// Implements the default message-pattern receive path. It first ensures that a
+// Implements the default message-protocol receive path. It first ensures that a
 // complete message is available, then hands that message to the shared pending
 // buffer logic so retry/drop semantics are consistent across transports.
 //------------------------------------------------------------------------------

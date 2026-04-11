@@ -53,7 +53,7 @@ typedef enum {
     NET_BAD_MESSAGE,      // The remote side sent an invalid message
     NET_TIMEOUT,          // An operation timed out before it could complete
     NET_WOULD_BLOCK,      // A non-blocking operation could not proceed yet
-    NET_WRONG_STATE,      // The current socket pattern state forbids this op
+    NET_WRONG_STATE,      // The current socket protocol state forbids this op
     NET_CLOSED,           // The peer closed the connection
     NET_ERROR,            // A general error occurred - dev needs to investigate
 } Net_Result;
@@ -82,7 +82,13 @@ typedef enum {
     NET_OPT_SEND_TIMEOUT_MS,
     NET_OPT_RECV_TIMEOUT_MS,
     NET_OPT_NONBLOCKING,
+    NET_OPT_TELNET_MODE,
 } Net_Option;
+
+typedef enum : u8 {
+    NET_TELNET_LINE_MODE,
+    NET_TELNET_CHARACTER_MODE,
+} Net_Telnet_Mode;
 
 typedef struct {
     Net_State       state; // Current connection/listener lifecycle state
@@ -156,6 +162,16 @@ Net_Result net_connect(Net_Socket* sock, cstr url);
 // `NET_OPT_RECONNECT_INTERVAL_MS` controls the delay between retry attempts
 // when the connect timeout allows waiting. A value of `0` means Nexus uses its
 // default retry interval.
+//
+// `NET_OPT_TELNET_MODE` applies only to telnet sockets. Use:
+//
+// - `NET_TELNET_LINE_MODE`
+// - `NET_TELNET_CHARACTER_MODE`
+//
+// Character mode affects both receive and send behaviour:
+//
+// - receive returns one character-sized message at a time
+// - send writes raw bytes without appending `CRLF`
 Net_Result net_set_option(Net_Socket* sock, Net_Option option, u64 value);
 Net_Result net_get_option(Net_Socket* sock, Net_Option option, u64* out_value);
 

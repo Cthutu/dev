@@ -160,7 +160,7 @@ Net_Result _net_udp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
     sock->state = NET_STATE_CONNECTED;
     _net_socket_set_ops(sock,
                         &_net_udp_transport_ops,
-                        _net_socket_data_ensure(sock)->pattern_ops);
+                        _net_socket_data_ensure(sock)->protocol_ops);
     return NET_OK;
 }
 
@@ -210,7 +210,7 @@ Net_Result _net_udp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
     sock->state = NET_STATE_CONNECTED;
     _net_socket_set_ops(sock,
                         &_net_udp_transport_ops,
-                        _net_socket_data_ensure(sock)->pattern_ops);
+                        _net_socket_data_ensure(sock)->protocol_ops);
     return NET_OK;
 }
 
@@ -251,7 +251,7 @@ Net_Result _net_udp_send(Net_Socket* sock, const void* buffer, usize len)
 // _net_udp_recv_message
 //
 // Receives one UDP datagram and stores it in the socket's pending buffer so the
-// message pattern can apply the same retry/drop semantics used for TCP.
+// message protocol can apply the same retry/drop semantics used for TCP.
 //------------------------------------------------------------------------------
 
 Net_Result _net_udp_recv_message(Net_Socket* sock)

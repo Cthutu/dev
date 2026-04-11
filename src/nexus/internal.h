@@ -12,7 +12,7 @@
 // Private runtime structures
 
 typedef struct Net_TransportOps     Net_TransportOps;
-typedef struct Net_PatternOps       Net_PatternOps;
+typedef struct Net_ProtocolOps      Net_ProtocolOps;
 typedef struct Net_MessageData      Net_MessageData;
 typedef struct Net_Pipe             Net_Pipe;
 typedef struct Net_TelnetState      Net_TelnetState;
@@ -37,12 +37,14 @@ struct Net_TelnetState {
     usize line_capacity;         // Allocated capacity for line_buffer
     u16   width;                 // Most recently negotiated console width
     u16   height;                // Most recently negotiated console height
+    u8    mode;                  // Current telnet input/output mode
     u8    parse_state;           // Current telnet parser state machine state
     u8    negotiation_command;   // Pending DO/DONT/WILL/WONT command byte
     u8    subnegotiation_option; // Current SB option byte
     u8    subnegotiation_data[8]; // Small SB payload buffer for NAWS parsing
     u8    subnegotiation_length;  // Number of bytes stored in SB payload
     bool  has_bounds;             // True once NAWS has produced valid bounds
+    bool  suppress_next_lf;       // True when a CR already emitted a newline
 };
 
 typedef enum : u8 {
@@ -79,7 +81,7 @@ typedef struct {
 struct Net_SocketData {
     Net_Socket_Kind         kind;          // Runtime-checked socket kind
     const Net_TransportOps* transport_ops; // Active transport behaviour
-    const Net_PatternOps*   pattern_ops;   // Active pattern behaviour
+    const Net_ProtocolOps*  protocol_ops;  // Active socket protocol behaviour
     Net_SocketOptions       options;       // Configured per-socket options
     Array(Net_Pipe*) pipes;                // Managed TCP/UDP reply paths
     void*     pending_message;             // Retained full message payload
@@ -114,14 +116,14 @@ struct Net_TransportOps {
     Net_Result (*recv_message)(Net_Socket* sock); // Transport-level receive
 };
 
-struct Net_PatternOps {
-    Net_Result (*send)(Net_Message* msg); // Pattern-aware send entry point
+struct Net_ProtocolOps {
+    Net_Result (*send)(Net_Message* msg); // Protocol-aware send entry point
     Net_Result (*recv)(
         Net_Socket* sock,
         void*       buffer,
         usize       len,
         usize*      out_recv_len,
-        Net_Pipe**  out_pipe); // Pattern-aware receive entry point
+        Net_Pipe**  out_pipe); // Protocol-aware receive entry point
 };
 
 //------------------------------------------------------------------------------
@@ -138,7 +140,7 @@ Net_ReqRepSocketData* _net_reqrep_socket_data(Net_Socket* sock);
 Net_TelnetSocketData* _net_telnet_socket_data(Net_Socket* sock);
 void                  _net_socket_set_ops(Net_Socket*             sock,
                                           const Net_TransportOps* transport_ops,
-                                          const Net_PatternOps*   pattern_ops);
+                                          const Net_ProtocolOps*  protocol_ops);
 void                  _net_log_error(void);
 int                   _net_create_socket(Net_Endpoint* endpoint);
 void                  _net_socket_clear_pending(Net_Socket* sock);
@@ -169,10 +171,9 @@ Net_Pipe*  _net_pipe_find_or_create_udp(Net_Socket*               sock,
                                         const struct sockaddr_in* addr);
 void       _net_pipe_close(Net_Pipe* pipe);
 Net_Result _net_pipe_send(Net_Pipe* pipe, const void* buffer, usize len);
-void       _net_telnet_state_done(Net_TelnetState* state);
 
 //------------------------------------------------------------------------------
-// Pattern entry points
+// Protocol entry points
 
 Net_Result _net_message_send(Net_Message* msg);
 Net_Result _net_message_recv(Net_Socket* sock,
@@ -186,6 +187,12 @@ Net_Result _net_reqrep_recv(Net_Socket* sock,
                             usize       len,
                             usize*      out_recv_len,
                             Net_Pipe**  out_pipe);
+Net_Result _net_tcp_send_text(Net_Socket* sock, const void* buffer, usize len);
+Net_Result _net_tcp_recv_telnet_message(Net_Socket* sock);
+void       _net_telnet_state_done(Net_TelnetState* state);
+Net_Result _net_telnet_request_session_state(Net_Socket* sock, int fd);
+
+extern const Net_TransportOps _net_telnet_tcp_transport_ops;
 
 //------------------------------------------------------------------------------
 // Transport entry points
@@ -205,6 +212,19 @@ Net_Result _net_udp_send_to_addr(int                       fd,
                                  const struct sockaddr_in* addr,
                                  const void*               buffer,
                                  usize                     len);
+
+//------------------------------------------------------------------------------
+// Shared TCP helper entry points
+
+TimePoint _net_timeout_deadline_from_option(u64 timeout_ms);
+bool      _net_socket_nonblocking(Net_Socket* sock);
+int       _net_timeout_poll_ms(TimePoint deadline);
+Net_Result
+_net_poll_fd(int fd, short events, TimePoint deadline, bool nonblocking);
+Net_Result _net_tcp_send_all_fd(
+    int fd, const u8* buffer, usize len, TimePoint deadline, bool nonblocking);
+Net_Result
+_net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline);
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------

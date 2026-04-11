@@ -10,17 +10,17 @@
 #include <unistd.h>
 
 //------------------------------------------------------------------------------
-// _net_message_pattern_ops
+// _net_message_protocol_ops
 //
-// Pattern operations for the default basic socket kind.
+// Protocol operations for the default basic socket kind.
 //------------------------------------------------------------------------------
 
-internal const Net_PatternOps _net_message_pattern_ops = {
+internal const Net_ProtocolOps _net_message_protocol_ops = {
     .send = _net_message_send,
     .recv = _net_message_recv,
 };
 
-internal const Net_PatternOps _net_reqrep_pattern_ops = {
+internal const Net_ProtocolOps _net_reqrep_protocol_ops = {
     .send = _net_reqrep_send,
     .recv = _net_reqrep_recv,
 };
@@ -70,6 +70,10 @@ internal Net_SocketData* _net_socket_data_alloc(Net_Socket* sock)
     data->options.recv_timeout_ms       = NET_WAIT_INFINITE;
     data->options.nonblocking           = 0;
 
+    if (sock->kind == NET_SOCKET_TELNET) {
+        ((Net_TelnetSocketData*)data)->telnet.mode = NET_TELNET_LINE_MODE;
+    }
+
     return data;
 }
 
@@ -108,16 +112,16 @@ Net_TelnetSocketData* _net_telnet_socket_data(Net_Socket* sock)
 //------------------------------------------------------------------------------
 // _net_socket_set_ops
 //
-// Updates the transport and pattern operation tables attached to a socket.
+// Updates the transport and protocol operation tables attached to a socket.
 //------------------------------------------------------------------------------
 
 void _net_socket_set_ops(Net_Socket*             sock,
                          const Net_TransportOps* transport_ops,
-                         const Net_PatternOps*   pattern_ops)
+                         const Net_ProtocolOps*  protocol_ops)
 {
     Net_SocketData* data = _net_socket_data_ensure(sock);
     data->transport_ops  = transport_ops;
-    data->pattern_ops    = pattern_ops;
+    data->protocol_ops   = protocol_ops;
 }
 
 //------------------------------------------------------------------------------
@@ -136,7 +140,7 @@ Net_Socket net_socket(void)
         .kind  = NET_SOCKET_BASIC,
     };
 
-    _net_socket_set_ops(&sock, NULL, &_net_message_pattern_ops);
+    _net_socket_set_ops(&sock, NULL, &_net_message_protocol_ops);
     return sock;
 }
 
@@ -154,7 +158,7 @@ Net_Socket net_request_socket(void)
         .fd    = -1,
         .kind  = NET_SOCKET_REQUEST,
     };
-    _net_socket_set_ops(&sock, NULL, &_net_reqrep_pattern_ops);
+    _net_socket_set_ops(&sock, NULL, &_net_reqrep_protocol_ops);
     _net_reqrep_socket_data(&sock)->send_next = true;
     return sock;
 }
@@ -173,7 +177,7 @@ Net_Socket net_reply_socket(void)
         .fd    = -1,
         .kind  = NET_SOCKET_REPLY,
     };
-    _net_socket_set_ops(&sock, NULL, &_net_reqrep_pattern_ops);
+    _net_socket_set_ops(&sock, NULL, &_net_reqrep_protocol_ops);
     _net_reqrep_socket_data(&sock)->send_next = false;
     return sock;
 }
@@ -192,7 +196,7 @@ Net_Socket net_telnet_socket(void)
         .fd    = -1,
         .kind  = NET_SOCKET_TELNET,
     };
-    _net_socket_set_ops(&sock, NULL, &_net_message_pattern_ops);
+    _net_socket_set_ops(&sock, NULL, &_net_message_protocol_ops);
     return sock;
 }
 
@@ -468,7 +472,7 @@ Net_Result net_bind(Net_Socket* sock, cstr url)
 // net_connect
 //
 // Connects a socket to the provided URL. For UDP this records the default peer
-// so the message pattern can continue to use the same send/receive interface.
+// so the message protocol can continue to use the same send/receive interface.
 //------------------------------------------------------------------------------
 
 Net_Result net_connect(Net_Socket* sock, cstr url)
@@ -523,6 +527,16 @@ Net_Result net_set_option(Net_Socket* sock, Net_Option option, u64 value)
     case NET_OPT_NONBLOCKING:
         data->options.nonblocking = value ? 1 : 0;
         return NET_OK;
+    case NET_OPT_TELNET_MODE:
+        if (sock->kind != NET_SOCKET_TELNET) {
+            return NET_PROTOCOL_NOT_SUPPORTED;
+        }
+        if (value != NET_TELNET_LINE_MODE &&
+            value != NET_TELNET_CHARACTER_MODE) {
+            return NET_ERROR;
+        }
+        _net_telnet_socket_data(sock)->telnet.mode = (u8)value;
+        return NET_OK;
     default:
         return NET_ERROR;
     }
@@ -558,6 +572,12 @@ Net_Result net_get_option(Net_Socket* sock, Net_Option option, u64* out_value)
     case NET_OPT_NONBLOCKING:
         *out_value = data->options.nonblocking;
         return NET_OK;
+    case NET_OPT_TELNET_MODE:
+        if (sock->kind != NET_SOCKET_TELNET) {
+            return NET_PROTOCOL_NOT_SUPPORTED;
+        }
+        *out_value = _net_telnet_socket_data(sock)->telnet.mode;
+        return NET_OK;
     default:
         return NET_ERROR;
     }
@@ -566,7 +586,7 @@ Net_Result net_get_option(Net_Socket* sock, Net_Option option, u64* out_value)
 //------------------------------------------------------------------------------
 // _net_socket_send
 //
-// Sends one raw payload using the active socket pattern. This is an internal
+// Sends one raw payload using the active socket protocol. This is an internal
 // helper used by the public message API after it has finished preparing the
 // payload stored in a `Net_Message`.
 //------------------------------------------------------------------------------
@@ -579,17 +599,17 @@ Net_Result _net_socket_send(Net_Message* msg)
 
     Net_Socket*     sock = msg->socket;
     Net_SocketData* data = _net_socket_data(sock);
-    if (!data || !data->pattern_ops || !data->pattern_ops->send) {
+    if (!data || !data->protocol_ops || !data->protocol_ops->send) {
         return NET_NOT_CONNECTED;
     }
 
-    return data->pattern_ops->send(msg);
+    return data->protocol_ops->send(msg);
 }
 
 //------------------------------------------------------------------------------
 // _net_socket_recv
 //
-// Receives one raw payload using the active socket pattern. If a previous
+// Receives one raw payload using the active socket protocol. If a previous
 // receive left a message pending, this helper consumes that retained message
 // before touching the network again.
 //------------------------------------------------------------------------------
@@ -601,11 +621,11 @@ Net_Result _net_socket_recv(Net_Socket* sock,
                             Net_Pipe**  out_pipe)
 {
     Net_SocketData* data = _net_socket_data(sock);
-    if (!data || !data->pattern_ops || !data->pattern_ops->recv) {
+    if (!data || !data->protocol_ops || !data->protocol_ops->recv) {
         return NET_NOT_CONNECTED;
     }
 
-    return data->pattern_ops->recv(sock, buffer, len, out_recv_len, out_pipe);
+    return data->protocol_ops->recv(sock, buffer, len, out_recv_len, out_pipe);
 }
 
 //------------------------------------------------------------------------------

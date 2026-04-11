@@ -31,12 +31,12 @@ int run(int argc, char* argv[])
     Net_Message msg = net_message_create(&sock);
     while (true) {
         result = net_recv(&msg);
-        if (net_telnet_bounds(&msg, &width, &height)) {
-            prn("Received telnet window size: %ux%u", width, height);
-        }
         if (NET_FAILED(result)) {
             fatal_error("Failed to receive telnet line: %s",
                         net_result_string(result));
+        }
+        if (net_telnet_bounds(&msg, &width, &height)) {
+            prn("Received telnet window size: %ux%u", width, height);
         }
 
         string line = string_from(msg.data, msg.length);

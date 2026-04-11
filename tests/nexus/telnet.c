@@ -29,6 +29,13 @@ typedef struct {
     bool  ready;
 } RawTcpServerArgs;
 
+typedef struct {
+    char       url[64];
+    Net_Result bind_result;
+    Net_Result recv_results[3];
+    char       received_chars[3];
+} TelnetCharServerArgs;
+
 internal u16 _nexus_choose_telnet_test_port(int sock_type, int proto)
 {
     int fd = socket(AF_INET, sock_type, proto);
@@ -146,6 +153,36 @@ internal void* _nexus_raw_tcp_line_server(void* arg)
     return NULL;
 }
 
+internal void* _nexus_telnet_character_server(void* arg)
+{
+    TelnetCharServerArgs* args = arg;
+
+    Net_Socket sock            = net_telnet_socket();
+    TEST_ASSERT_EQ(
+        net_set_option(&sock, NET_OPT_TELNET_MODE, NET_TELNET_CHARACTER_MODE),
+        NET_OK);
+
+    args->bind_result = net_bind(&sock, args->url);
+    if (NET_FAILED(args->bind_result)) {
+        return NULL;
+    }
+
+    Net_Message msg = net_message_create(&sock);
+    for (usize i = 0; i < 3; ++i) {
+        args->recv_results[i] = net_recv(&msg);
+        if (NET_FAILED(args->recv_results[i])) {
+            break;
+        }
+
+        TEST_ASSERT_EQ(msg.length, (usize)1);
+        args->received_chars[i] = (char)msg.data[0];
+    }
+
+    net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
 TEST_CASE(nexus, telnet_socket_round_trip_over_tcp)
 {
     TelnetServerArgs server_args = {
@@ -222,6 +259,107 @@ TEST_CASE(nexus, telnet_socket_sends_crlf_terminated_lines)
 
     TEST_ASSERT_EQ(server_args.received_len, (usize)12);
     TEST_ASSERT_MEM_EQ(server_args.received_bytes, "plain line\r\n", 12);
+}
+
+TEST_CASE(nexus, telnet_character_mode_receives_one_character_per_message)
+{
+    TelnetCharServerArgs server_args = {0};
+    _nexus_make_telnet_test_url(server_args.url, sizeof(server_args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_telnet_character_server, &server_args));
+
+    _nexus_telnet_wait_for_server_start();
+
+    int client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT(client_fd >= 0);
+
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port   = htons((u16)atoi(strrchr(server_args.url, ':') + 1)),
+    };
+    TEST_ASSERT(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    TEST_ASSERT(connect(client_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0);
+
+    u8    negotiation[12];
+    usize received = 0;
+    while (received < sizeof(negotiation)) {
+        ssize_t result = recv(client_fd,
+                              negotiation + received,
+                              sizeof(negotiation) - received,
+                              0);
+        TEST_ASSERT(result > 0);
+        received += (usize)result;
+    }
+    TEST_ASSERT_MEM_EQ(negotiation,
+                       ((u8[]){
+                           255,
+                           253,
+                           31,
+                           255,
+                           251,
+                           1,
+                           255,
+                           251,
+                           3,
+                           255,
+                           253,
+                           3,
+                       }),
+                       sizeof(negotiation));
+
+    const u8 payload[] = {'a', 'b', '\r', '\n'};
+    TEST_ASSERT_EQ(send(client_fd, payload, sizeof(payload), 0),
+                   (ssize_t)sizeof(payload));
+
+    close(client_fd);
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_results[0], NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_results[1], NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_results[2], NET_OK);
+    TEST_ASSERT_MEM_EQ(server_args.received_chars, "ab\n", 3);
+}
+
+TEST_CASE(nexus, telnet_character_mode_sends_raw_bytes_without_crlf)
+{
+    RawTcpServerArgs server_args = {
+        .port = _nexus_choose_telnet_test_port(SOCK_STREAM, IPPROTO_TCP),
+    };
+    char url[64];
+    snprintf(
+        url, sizeof(url), "tcp://127.0.0.1:%u", (unsigned)server_args.port);
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_raw_tcp_line_server, &server_args));
+
+    while (!server_args.ready) {
+        thread_sleep_ms(1);
+    }
+
+    Net_Socket client = net_telnet_socket();
+    TEST_ASSERT_EQ(
+        net_set_option(&client, NET_OPT_TELNET_MODE, NET_TELNET_CHARACTER_MODE),
+        NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&client, NET_OPT_CONNECT_TIMEOUT_MS, 1000),
+                   NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&client, NET_OPT_RECONNECT_INTERVAL_MS, 25),
+                   NET_OK);
+    TEST_ASSERT_EQ(net_connect(&client, url), NET_OK);
+
+    Net_Message msg = net_message_create(&client);
+    net_message_append(&msg, "xy", 2);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    net_message_done(&msg);
+    net_close(&client);
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(server_args.received_len, (usize)2);
+    TEST_ASSERT_MEM_EQ(server_args.received_bytes, "xy", 2);
 }
 
 TEST_CASE(nexus, telnet_socket_ignores_telnet_negotiation_bytes)
@@ -387,4 +525,29 @@ TEST_CASE(nexus, telnet_bounds_are_unavailable_on_non_telnet_sockets)
 
     net_message_done(&msg);
     net_close(&request);
+}
+
+TEST_CASE(nexus, telnet_mode_option_round_trips_and_rejects_non_telnet_sockets)
+{
+    u64 value         = 99;
+
+    Net_Socket telnet = net_telnet_socket();
+    TEST_ASSERT_EQ(net_get_option(&telnet, NET_OPT_TELNET_MODE, &value),
+                   NET_OK);
+    TEST_ASSERT_EQ(value, (u64)NET_TELNET_LINE_MODE);
+    TEST_ASSERT_EQ(
+        net_set_option(&telnet, NET_OPT_TELNET_MODE, NET_TELNET_CHARACTER_MODE),
+        NET_OK);
+    TEST_ASSERT_EQ(net_get_option(&telnet, NET_OPT_TELNET_MODE, &value),
+                   NET_OK);
+    TEST_ASSERT_EQ(value, (u64)NET_TELNET_CHARACTER_MODE);
+    net_close(&telnet);
+
+    Net_Socket basic = net_socket();
+    TEST_ASSERT_EQ(
+        net_set_option(&basic, NET_OPT_TELNET_MODE, NET_TELNET_CHARACTER_MODE),
+        NET_PROTOCOL_NOT_SUPPORTED);
+    TEST_ASSERT_EQ(net_get_option(&basic, NET_OPT_TELNET_MODE, &value),
+                   NET_PROTOCOL_NOT_SUPPORTED);
+    net_close(&basic);
 }

@@ -34,6 +34,7 @@ The following work is already in place:
 - request/reply socket kinds
 - telnet socket kind with:
   - line-oriented TCP behaviour
+  - character mode via socket option
   - telnet negotiation filtering
   - NAWS-based bounds query via `net_telnet_bounds`
 - socket options for:
@@ -53,7 +54,7 @@ These rules remain active:
 - Put shared private declarations in `internal.h`.
 - Keep public API types and declarations in `nexus.h`.
 - Split implementation concerns into separate `.c` files inside `src/nexus`.
-- Keep transport logic separate from pattern logic.
+- Keep transport logic separate from protocol logic.
 - Progress on Nexus must include tests in the existing test framework.
 
 This means:
@@ -84,7 +85,7 @@ The implementation currently separates:
 - transport:
   - TCP
   - UDP
-- pattern / socket behaviour:
+- protocol / socket behaviour:
   - basic message
   - request/reply
   - telnet
@@ -123,22 +124,7 @@ Current telnet limits:
 
 ## Next Work
 
-### 1. Telnet character mode
-
-This is the next highest-value feature for the MUD direction.
-
-Needed outcome:
-
-- a telnet mode where input can be received character-by-character instead of
-  line-by-line
-
-Likely implications:
-
-- a telnet mode flag or telnet-specific socket option
-- parser behaviour that can emit single key/input units
-- careful handling of escape/control sequences
-
-### 2. Richer telnet session state
+### 1. Richer telnet session state
 
 Only add the telnet state that helps real interactive applications.
 
@@ -152,7 +138,7 @@ The most likely useful pieces are:
 This should stay query-oriented and cached. Higher layers can decide whether
 changes matter.
 
-### 3. Telnet-specific documentation
+### 2. Telnet-specific documentation
 
 Current telnet docs cover:
 
@@ -164,7 +150,7 @@ Still useful later:
 - how to build a character-mode telnet server
 - how to use telnet bounds in a layout-driven application
 
-### 4. Possible public wait/poll API
+### 3. Possible public wait/poll API
 
 This is optional, not the current priority.
 
@@ -175,8 +161,6 @@ than raw file-descriptor readiness.
 
 The telnet features most likely to matter for a MUD engine are:
 
-- character mode
-  - needed for immediate key handling instead of waiting for newline
 - suppress-go-ahead negotiation
   - useful for more interactive telnet behaviour
 - echo negotiation awareness
@@ -211,7 +195,10 @@ These remain required:
 
 The next concrete implementation step should be:
 
-- telnet character mode
+- richer telnet negotiation state, especially:
+  - suppress-go-ahead
+  - echo negotiation awareness
+  - terminal type negotiation
 
-That is the main missing feature between the current telnet support and a more
-useful foundation for a MUD engine.
+That is the main missing telnet capability between the current implementation
+and a more useful foundation for a MUD engine.

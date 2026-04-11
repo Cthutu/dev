@@ -21,6 +21,9 @@ Do not use it when:
 - you want UDP
 - you need character-at-a-time input already
 
+Line mode is the default telnet mode. You do not need to set a socket option
+for it unless you want to switch back from character mode explicitly.
+
 ## Steps
 
 1. Create a socket with `net_telnet_socket()`.

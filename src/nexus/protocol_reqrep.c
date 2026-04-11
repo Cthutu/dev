@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------------
-// Request/reply pattern
+// Request/reply protocol
 //
 // Copyright (C)2026 Matt Davies, all rights reserved
 //------------------------------------------------------------------------------
@@ -9,7 +9,7 @@
 //------------------------------------------------------------------------------
 // _net_reqrep_send
 //
-// Sends one request/reply-pattern message. The socket must currently be in its
+// Sends one request/reply-protocol message. The socket must currently be in its
 // send phase: request sockets start there, and reply sockets enter it after a
 // successful receive.
 //------------------------------------------------------------------------------
@@ -23,7 +23,7 @@ Net_Result _net_reqrep_send(Net_Message* msg)
     Net_Socket*           sock = msg->socket;
     Net_SocketData*       data = _net_socket_data(sock);
     Net_ReqRepSocketData* rdat = _net_reqrep_socket_data(sock);
-    if (!data || !data->pattern_ops || !data->transport_ops ||
+    if (!data || !data->protocol_ops || !data->transport_ops ||
         !data->transport_ops->send) {
         return NET_NOT_CONNECTED;
     }
@@ -61,7 +61,7 @@ Net_Result _net_reqrep_send(Net_Message* msg)
 //------------------------------------------------------------------------------
 // _net_reqrep_recv
 //
-// Receives one request/reply-pattern message. The socket must currently be in
+// Receives one request/reply-protocol message. The socket must currently be in
 // its receive phase: reply sockets start there, and request sockets enter it
 // after a successful send.
 //------------------------------------------------------------------------------

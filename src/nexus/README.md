@@ -264,6 +264,7 @@ By default, send and receive operations wait indefinitely.
 ### Non-blocking mode
 
 - `NET_OPT_NONBLOCKING`
+- `NET_OPT_TELNET_MODE`
 
 When enabled, operations that cannot make progress immediately return
 `NET_WOULD_BLOCK` instead of waiting.
@@ -311,15 +312,19 @@ Use `net_result_string(result)` for readable diagnostics.
 - received messages retain sender routing information
 - replies can be sent using the same received `Net_Message`
 
+- `NET_OPT_TELNET_MODE` applies only to telnet sockets.
+
+Use:
+
+- `NET_TELNET_LINE_MODE`
+- `NET_TELNET_CHARACTER_MODE`
+
 ## Current limitations
 
 This module is still intentionally small. Some things are not there yet:
 
 - no host name lookup
 - no IPv6 URL handling
-- telnet is line-oriented only for now
-- no telnet character mode yet
-- telnet character mode is not implemented yet
 - telnet bounds depend on NAWS support from the client
 - no public wait/poll API yet
 
