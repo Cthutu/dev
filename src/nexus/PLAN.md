@@ -29,6 +29,7 @@ Keep the module split clean as implementation complexity grows.
 - Move distinct implementation concerns into separate `.c` files inside
   `src/nexus`.
 - Split transport implementations from pattern implementations.
+- Progress on the module must include tests in the existing test framework.
 
 This means `internal.h` should contain things such as:
 
@@ -39,6 +40,9 @@ This means `internal.h` should contain things such as:
 
 and should not force those details into the public API unless users actually
 need them.
+
+New behaviour and bug fixes should be covered by tests under `tests/`, with
+`tests/nexus/` used for Nexus-specific coverage where appropriate.
 
 ### 1. Separate transport from pattern
 
@@ -111,7 +115,7 @@ The maximum allowed message size should be exposed as a `#define` in
 `nexus.h`. For the first implementation, use a conservative default such as
 1 MiB.
 
-### Send behavior
+### Send behaviour
 
 For TCP:
 
@@ -124,7 +128,7 @@ For UDP:
 
 - `net_send` remains one datagram send
 
-### Receive behavior
+### Receive behaviour
 
 For TCP:
 
@@ -136,7 +140,7 @@ For TCP:
 - if the caller passes `NULL` for the buffer, the pending message is explicitly
   dropped
 
-This behavior should be documented clearly in `nexus.h`.
+This behaviour should be documented clearly in `nexus.h`.
 
 For UDP:
 
@@ -144,7 +148,7 @@ For UDP:
 
 ### New result codes likely needed
 
-Keep the result space small and shaped by API behavior rather than raw syscall
+Keep the result space small and shaped by API behaviour rather than raw syscall
 errors.
 
 Likely useful:
@@ -171,7 +175,7 @@ Likely avoid:
 `Net_State` is allowed to change or disappear if it stops helping.
 
 Current state is useful for basic lifecycle tracking, but it may become too
-coarse once sockets have transport and pattern behavior.
+coarse once sockets have transport and pattern behaviour.
 
 Possible direction:
 
@@ -180,7 +184,7 @@ Possible direction:
   - waiting connection
   - connected
   - closed
-- move behavior decisions out of `Net_State` and into transport/pattern tables
+- move behaviour decisions out of `Net_State` and into transport/pattern tables
 
 ### Internal structures
 
@@ -217,15 +221,15 @@ Target direction:
   - public API entry points
   - thin dispatch and high-level lifecycle glue
 - `transport_tcp.c`
-  - TCP creation, connect/bind behavior, framing send/recv helpers
+  - TCP creation, connect/bind behaviour, framing send/recv helpers
 - `transport_udp.c`
-  - UDP creation, send/recv behavior, peer-address handling
+  - UDP creation, send/recv behaviour, peer-address handling
 - `pattern_message.c`
-  - default message socket behavior
+  - default message socket behaviour
 - `pattern_reqrep.c`
   - future request/reply rules
 - `pattern_telnet.c`
-  - future telnet-oriented behavior
+  - future telnet-oriented behaviour
 - `url.c`
   - URL parsing
 - `internal.h`
@@ -263,16 +267,16 @@ Initial candidates:
 - `net_reply_socket`
 - `net_telnet_socket`
 
-Planned behavior:
+Planned behaviour:
 
 - request/reply constrains send/recv ordering
-- telnet uses stream-oriented text behavior instead of framed binary messages
+- telnet uses stream-oriented text behaviour instead of framed binary messages
 - raw message sockets use:
   - TCP with framing
   - UDP with datagrams
 
 The important architectural point is that these constructors choose pattern
-behavior first, and transport support second.
+behaviour first, and transport support second.
 
 ## Multi-Client Server Model
 
@@ -283,7 +287,7 @@ For a server handling multiple clients, one socket cannot cleanly represent both
 - the listening endpoint
 - every active client conversation
 
-The current one-socket server behavior is acceptable for the first simple demo,
+The current one-socket server behaviour is acceptable for the first simple demo,
 but it should not be treated as the long-term model for TCP servers.
 
 ### Internal concepts we should separate
@@ -386,7 +390,7 @@ it is stored inside the message object itself.
 
 Pros:
 
-- unifies TCP and UDP server-side behavior
+- unifies TCP and UDP server-side behaviour
 - matches message-oriented semantics
 - good fit for future req/rep sockets
 
@@ -479,7 +483,7 @@ That gives one consistent mental model:
 
 ### What to avoid
 
-Avoid making the long-term API depend on this behavior:
+Avoid making the long-term API depend on this behaviour:
 
 - a bound TCP socket accepts one client during `net_recv`
 - the socket permanently stops being a listener
@@ -592,7 +596,7 @@ For future higher-level APIs:
 The preferred long-term server-side abstraction is now a reusable message
 object.
 
-### Public behavior
+### Public behaviour
 
 A future `Net_Message` should provide:
 
@@ -631,7 +635,7 @@ manage offsets for common cases.
 ### Socket association
 
 Messages should be created for a specific socket so the implementation can bind
-them to the correct transport/pattern behavior and attach hidden routing
+them to the correct transport/pattern behaviour and attach hidden routing
 context.
 
 That supports:
@@ -717,7 +721,7 @@ These have now been resolved for the first implementation:
 1. Maximum message size:
    - yes, define one in `nexus.h`
    - use a conservative default such as 1 MiB
-2. Oversized receive behavior:
+2. Oversized receive behaviour:
    - return `NET_BUFFER_TOO_SMALL`
    - leave the message pending so the caller can retry with a larger buffer
    - report the required payload size via `out_recv_len`
@@ -739,8 +743,8 @@ The implementation should follow the resolved decisions above, and `nexus.h`
 should gain documentation comments that explain:
 
 - framed TCP message semantics
-- maximum message size behavior
-- `NET_BUFFER_TOO_SMALL` retry behavior
+- maximum message size behaviour
+- `NET_BUFFER_TOO_SMALL` retry behaviour
 - `out_recv_len` semantics on `NET_BUFFER_TOO_SMALL`
 - the `NULL` buffer convention for dropping a pending message
 - zero-length message support
