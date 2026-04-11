@@ -31,10 +31,15 @@ internal const Net_TransportOps _net_udp_transport_ops = {
 // A timeout of `NET_WAIT_INFINITE` blocks forever.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_udp_wait_fd(int fd, short events, u64 timeout_ms)
+internal Net_Result _net_udp_wait_fd(int   fd,
+                                     short events,
+                                     u64   timeout_ms,
+                                     bool  nonblocking)
 {
     int timeout = -1;
-    if (timeout_ms != NET_WAIT_INFINITE) {
+    if (nonblocking) {
+        timeout = 0;
+    } else if (timeout_ms != NET_WAIT_INFINITE) {
         timeout = (int)MIN(timeout_ms, (u64)INT_MAX);
     }
 
@@ -46,7 +51,7 @@ internal Net_Result _net_udp_wait_fd(int fd, short events, u64 timeout_ms)
     while (true) {
         int poll_result = poll(&poll_fd, 1, timeout);
         if (poll_result == 0) {
-            return NET_TIMEOUT;
+            return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
         }
 
         if (poll_result < 0) {
@@ -84,7 +89,8 @@ Net_Result _net_udp_send_to_addr(int                       fd,
                                  const void*               buffer,
                                  usize                     len)
 {
-    Net_Result wait_result = _net_udp_wait_fd(fd, POLLOUT, NET_WAIT_INFINITE);
+    Net_Result wait_result =
+        _net_udp_wait_fd(fd, POLLOUT, NET_WAIT_INFINITE, false);
     if (NET_FAILED(wait_result)) {
         return wait_result;
     }
@@ -216,8 +222,11 @@ Net_Result _net_udp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 
 Net_Result _net_udp_send(Net_Socket* sock, const void* buffer, usize len)
 {
-    Net_Result wait_result = _net_udp_wait_fd(
-        sock->fd, POLLOUT, _net_socket_data(sock)->options.send_timeout_ms);
+    Net_Result wait_result =
+        _net_udp_wait_fd(sock->fd,
+                         POLLOUT,
+                         _net_socket_data(sock)->options.send_timeout_ms,
+                         _net_socket_data(sock)->options.nonblocking != 0);
     if (NET_FAILED(wait_result)) {
         return wait_result;
     }
@@ -247,8 +256,11 @@ Net_Result _net_udp_send(Net_Socket* sock, const void* buffer, usize len)
 
 Net_Result _net_udp_recv_message(Net_Socket* sock)
 {
-    Net_Result wait_result = _net_udp_wait_fd(
-        sock->fd, POLLIN, _net_socket_data(sock)->options.recv_timeout_ms);
+    Net_Result wait_result =
+        _net_udp_wait_fd(sock->fd,
+                         POLLIN,
+                         _net_socket_data(sock)->options.recv_timeout_ms,
+                         _net_socket_data(sock)->options.nonblocking != 0);
     if (NET_FAILED(wait_result)) {
         return wait_result;
     }

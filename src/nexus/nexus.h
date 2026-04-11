@@ -52,6 +52,7 @@ typedef enum {
     NET_BUFFER_TOO_SMALL, // Receive buffer cannot hold the full pending message
     NET_BAD_MESSAGE,      // The remote side sent an invalid message
     NET_TIMEOUT,          // An operation timed out before it could complete
+    NET_WOULD_BLOCK,      // A non-blocking operation could not proceed yet
     NET_CLOSED,           // The peer closed the connection
     NET_ERROR,            // A general error occurred - dev needs to investigate
 } Net_Result;

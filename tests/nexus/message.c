@@ -68,6 +68,13 @@ typedef struct {
     string     received_string;
 } RecvTimeoutArgs;
 
+typedef struct {
+    char       url[64];
+    Net_Result bind_result;
+    Net_Result recv_result;
+    u32        recv_delay_ms;
+} NonblockingServerArgs;
+
 internal void _nexus_message_wait_for_server_start(void)
 {
     thread_sleep_ms(50);
@@ -307,6 +314,30 @@ internal void* _nexus_delayed_client_send(void* arg)
     Net_Message msg = net_message_create(&sock);
     net_message_append_string(&msg, S("delayed-send"));
     (void)net_send(&msg);
+
+    net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
+internal void* _nexus_nonblocking_server_recv_once(void* arg)
+{
+    NonblockingServerArgs* args = arg;
+
+    Net_Socket sock             = net_socket();
+    args->bind_result           = net_bind(&sock, args->url);
+    if (NET_FAILED(args->bind_result)) {
+        return NULL;
+    }
+
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_NONBLOCKING, 1), NET_OK);
+
+    if (args->recv_delay_ms > 0) {
+        thread_sleep_ms(args->recv_delay_ms);
+    }
+
+    Net_Message msg   = net_message_create(&sock);
+    args->recv_result = net_recv(&msg);
 
     net_message_done(&msg);
     net_close(&sock);
@@ -656,4 +687,72 @@ TEST_CASE(nexus, recv_succeeds_when_message_arrives_before_timeout)
     TEST_ASSERT_EQ(args.recv_result, NET_OK);
     TEST_ASSERT_EQ(args.received_string.count, (usize)12);
     TEST_ASSERT_MEM_EQ(args.received_string.data, "delayed-send", 12);
+}
+
+TEST_CASE(nexus, nonblocking_connect_returns_would_block_when_server_is_absent)
+{
+    char url[64];
+    _nexus_make_message_test_url(url, sizeof(url));
+
+    Net_Socket sock = net_socket();
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_NONBLOCKING, 1), NET_OK);
+
+    TEST_ASSERT_EQ(net_connect(&sock, url), NET_WOULD_BLOCK);
+
+    net_close(&sock);
+}
+
+TEST_CASE(nexus, nonblocking_recv_returns_would_block_when_no_client_arrives)
+{
+    NonblockingServerArgs args = {0};
+    _nexus_make_message_test_url(args.url, sizeof(args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_nonblocking_server_recv_once, &args));
+
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_WOULD_BLOCK);
+}
+
+TEST_CASE(nexus, nonblocking_recv_returns_would_block_when_client_sends_nothing)
+{
+    NonblockingServerArgs args = {
+        .recv_delay_ms = 200,
+    };
+    _nexus_make_message_test_url(args.url, sizeof(args.url));
+
+    Net_Socket client = net_socket();
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_nonblocking_server_recv_once, &args));
+
+    _nexus_message_wait_for_server_start();
+    TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
+
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_result, NET_WOULD_BLOCK);
+
+    net_close(&client);
+}
+
+TEST_CASE(nexus, nonblocking_udp_recv_returns_would_block_without_datagram)
+{
+    char url[64];
+    _nexus_make_udp_message_test_url(url, sizeof(url));
+
+    Net_Socket sock = net_socket();
+    TEST_ASSERT_EQ(net_bind(&sock, url), NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_NONBLOCKING, 1), NET_OK);
+
+    Net_Message msg = net_message_create(&sock);
+    TEST_ASSERT_EQ(net_recv(&msg), NET_WOULD_BLOCK);
+
+    net_message_done(&msg);
+    net_close(&sock);
 }

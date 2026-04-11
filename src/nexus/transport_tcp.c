@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -44,6 +45,11 @@ internal TimePoint _net_timeout_deadline_from_option(u64 timeout_ms)
     return time_add_duration(time_now(), time_from_ms(timeout_ms));
 }
 
+internal bool _net_socket_nonblocking(Net_Socket* sock)
+{
+    return _net_socket_data(sock)->options.nonblocking != 0;
+}
+
 //------------------------------------------------------------------------------
 // _net_timeout_poll_ms
 //
@@ -72,7 +78,10 @@ internal int _net_timeout_poll_ms(TimePoint deadline)
 // expires.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_poll_fd(int fd, short events, TimePoint deadline)
+internal Net_Result _net_poll_fd(int       fd,
+                                 short     events,
+                                 TimePoint deadline,
+                                 bool      nonblocking)
 {
     struct pollfd poll_fd = {
         .fd     = fd,
@@ -82,7 +91,7 @@ internal Net_Result _net_poll_fd(int fd, short events, TimePoint deadline)
     while (true) {
         int poll_result = poll(&poll_fd, 1, _net_timeout_poll_ms(deadline));
         if (poll_result == 0) {
-            return NET_TIMEOUT;
+            return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
         }
 
         if (poll_result < 0) {
@@ -120,10 +129,8 @@ internal Net_Result _net_poll_fd(int fd, short events, TimePoint deadline)
 // writes until the requested byte count has been sent or an error occurs.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_tcp_send_all_fd(int       fd,
-                                         const u8* buffer,
-                                         usize     len,
-                                         TimePoint deadline)
+internal Net_Result _net_tcp_send_all_fd(
+    int fd, const u8* buffer, usize len, TimePoint deadline, bool nonblocking)
 {
     usize sent  = 0;
     int   flags = 0;
@@ -133,7 +140,8 @@ internal Net_Result _net_tcp_send_all_fd(int       fd,
 #endif
 
     while (sent < len) {
-        Net_Result wait_result = _net_poll_fd(fd, POLLOUT, deadline);
+        Net_Result wait_result =
+            _net_poll_fd(fd, POLLOUT, deadline, nonblocking);
         if (NET_FAILED(wait_result)) {
             return wait_result;
         }
@@ -199,6 +207,99 @@ internal bool _net_tcp_should_retry_connect(int err)
     }
 }
 
+internal Net_Result _net_tcp_available_bytes(int fd, usize* out_available)
+{
+    int available = 0;
+    if (ioctl(fd, FIONREAD, &available) < 0) {
+        _net_log_error();
+        return NET_ERROR;
+    }
+
+    *out_available = (usize)MAX(available, 0);
+    return NET_OK;
+}
+
+internal Net_Result _net_tcp_peek_frame_length(int    fd,
+                                               usize* out_frame_len,
+                                               bool   nonblocking)
+{
+    u32     header = 0;
+    ssize_t peeked = recv(fd, &header, sizeof(header), MSG_PEEK | MSG_DONTWAIT);
+    if (peeked == 0) {
+        return NET_CLOSED;
+    }
+
+    if (peeked < 0) {
+        switch (errno) {
+        case EAGAIN:
+#if EWOULDBLOCK != EAGAIN
+        case EWOULDBLOCK:
+#endif
+            return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
+        case ENETDOWN:
+            return NET_NO_NETWORK;
+        case ECONNRESET:
+            return NET_CLOSED;
+        default:
+            _net_log_error();
+            return NET_ERROR;
+        }
+    }
+
+    if ((usize)peeked < sizeof(header)) {
+        return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
+    }
+
+    *out_frame_len = (usize)ntohl(header);
+    return NET_OK;
+}
+
+internal Net_Result _net_tcp_wait_for_full_frame(Net_Socket* sock,
+                                                 int         fd,
+                                                 TimePoint   deadline,
+                                                 usize*      out_frame_len)
+{
+    bool nonblocking = _net_socket_nonblocking(sock);
+
+    while (true) {
+        Net_Result wait_result =
+            _net_poll_fd(fd, POLLIN, deadline, nonblocking);
+        if (NET_FAILED(wait_result)) {
+            return wait_result;
+        }
+
+        usize      frame_len = 0;
+        Net_Result result =
+            _net_tcp_peek_frame_length(fd, &frame_len, nonblocking);
+        if (result == NET_WOULD_BLOCK || result == NET_TIMEOUT) {
+            if (nonblocking) {
+                return NET_WOULD_BLOCK;
+            }
+            continue;
+        }
+        if (NET_FAILED(result)) {
+            return result;
+        }
+
+        usize available = 0;
+        result          = _net_tcp_available_bytes(fd, &available);
+        if (NET_FAILED(result)) {
+            return result;
+        }
+
+        usize needed = sizeof(u32) + frame_len;
+        if (available < needed) {
+            if (nonblocking) {
+                return NET_WOULD_BLOCK;
+            }
+            continue;
+        }
+
+        *out_frame_len = frame_len;
+        return NET_OK;
+    }
+}
+
 //------------------------------------------------------------------------------
 // _net_tcp_recv_exact_fd
 //
@@ -215,7 +316,7 @@ internal Net_Result _net_tcp_recv_exact_fd(int       fd,
     usize recv_size = 0;
 
     while (recv_size < len) {
-        Net_Result wait_result = _net_poll_fd(fd, POLLIN, deadline);
+        Net_Result wait_result = _net_poll_fd(fd, POLLIN, deadline, false);
         if (NET_FAILED(wait_result)) {
             return wait_result;
         }
@@ -285,7 +386,7 @@ Net_Result _net_tcp_send_framed_fd(int fd, const void* buffer, usize len)
     u32       frame_len = htonl((u32)len);
 
     Net_Result result   = _net_tcp_send_all_fd(
-        fd, (const u8*)&frame_len, sizeof(frame_len), deadline);
+        fd, (const u8*)&frame_len, sizeof(frame_len), deadline, false);
     if (NET_FAILED(result)) {
         return result;
     }
@@ -294,7 +395,7 @@ Net_Result _net_tcp_send_framed_fd(int fd, const void* buffer, usize len)
         return NET_OK;
     }
 
-    return _net_tcp_send_all_fd(fd, buffer, len, deadline);
+    return _net_tcp_send_all_fd(fd, buffer, len, deadline, false);
 }
 
 //------------------------------------------------------------------------------
@@ -365,6 +466,7 @@ internal Net_Result _net_tcp_poll_ready_pipe(Net_Socket* sock,
                                              Net_Pipe**  out,
                                              TimePoint   deadline)
 {
+    bool            nonblocking  = _net_socket_nonblocking(sock);
     Net_SocketData* data         = _net_socket_data(sock);
     Array(struct pollfd) pollfds = 0;
     Array(Net_Pipe*) pipes       = 0;
@@ -396,7 +498,7 @@ internal Net_Result _net_tcp_poll_ready_pipe(Net_Socket* sock,
     if (poll_result == 0) {
         array_free(pollfds);
         array_free(pipes);
-        return NET_TIMEOUT;
+        return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
     }
     if (poll_result < 0) {
         array_free(pollfds);
@@ -469,23 +571,34 @@ internal Net_Result _net_tcp_recv_message_from_fd(Net_Socket* sock,
                                                   Net_Pipe*   pipe,
                                                   TimePoint   deadline)
 {
-    u32        frame_len_n = 0;
+    usize      frame_len = 0;
     Net_Result result =
-        _net_tcp_recv_exact_fd(fd, &frame_len_n, sizeof(frame_len_n), deadline);
+        _net_tcp_wait_for_full_frame(sock, fd, deadline, &frame_len);
     if (NET_FAILED(result)) {
         return result;
     }
 
-    usize frame_len        = (usize)ntohl(frame_len_n);
     usize max_message_size = _net_socket_data(sock)->max_message_size;
     if (frame_len > max_message_size) {
         // Consume the full oversized frame so future receives remain aligned to
         // the next frame boundary.
+        u32 frame_len_n = 0;
+        result =
+            _net_tcp_recv_exact_fd(fd, &frame_len_n, sizeof(frame_len_n), 0);
+        if (NET_FAILED(result)) {
+            return result;
+        }
         result = _net_tcp_discard_exact_fd(fd, frame_len, deadline);
         if (NET_FAILED(result)) {
             return result;
         }
         return NET_BAD_MESSAGE;
+    }
+
+    u32 frame_len_n = 0;
+    result = _net_tcp_recv_exact_fd(fd, &frame_len_n, sizeof(frame_len_n), 0);
+    if (NET_FAILED(result)) {
+        return result;
     }
 
     if (frame_len == 0) {
@@ -494,7 +607,7 @@ internal Net_Result _net_tcp_recv_message_from_fd(Net_Socket* sock,
     }
 
     void* frame_buffer = mem_realloc(NULL, frame_len, __FILE__, __LINE__);
-    result = _net_tcp_recv_exact_fd(fd, frame_buffer, frame_len, deadline);
+    result             = _net_tcp_recv_exact_fd(fd, frame_buffer, frame_len, 0);
     if (NET_FAILED(result)) {
         mem_free(frame_buffer, __FILE__, __LINE__);
         return result;
@@ -583,9 +696,11 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 {
     struct sockaddr_in addr;
     _net_endpoint_to_addr(endpoint, &addr);
-    Net_SocketData* data               = _net_socket_data_ensure(sock);
-    u64             connect_timeout_ms = data->options.connect_timeout_ms;
-    TimePoint       start_time         = time_now();
+    Net_SocketData* data        = _net_socket_data_ensure(sock);
+    bool            nonblocking = _net_socket_nonblocking(sock);
+    u64             connect_timeout_ms =
+        nonblocking ? NET_WAIT_IMMEDIATE : data->options.connect_timeout_ms;
+    TimePoint start_time = time_now();
 
     while (true) {
         int fd = _net_create_socket(endpoint);
@@ -634,7 +749,8 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
         }
 
         if (connect_timeout_ms == NET_WAIT_IMMEDIATE) {
-            return NET_TIMEOUT;
+            return _net_socket_nonblocking(sock) ? NET_WOULD_BLOCK
+                                                 : NET_TIMEOUT;
         }
 
         if (connect_timeout_ms != NET_WAIT_INFINITE) {
@@ -666,12 +782,18 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 
 Net_Result _net_tcp_send(Net_Socket* sock, const void* buffer, usize len)
 {
-    TimePoint deadline = _net_timeout_deadline_from_option(
-        _net_socket_data(sock)->options.send_timeout_ms);
+    bool      nonblocking = _net_socket_nonblocking(sock);
+    TimePoint deadline =
+        nonblocking ? time_now()
+                    : _net_timeout_deadline_from_option(
+                          _net_socket_data(sock)->options.send_timeout_ms);
     u32 frame_len     = htonl((u32)len);
 
-    Net_Result result = _net_tcp_send_all_fd(
-        sock->fd, (const u8*)&frame_len, sizeof(frame_len), deadline);
+    Net_Result result = _net_tcp_send_all_fd(sock->fd,
+                                             (const u8*)&frame_len,
+                                             sizeof(frame_len),
+                                             deadline,
+                                             nonblocking);
     if (NET_FAILED(result)) {
         return result;
     }
@@ -680,7 +802,7 @@ Net_Result _net_tcp_send(Net_Socket* sock, const void* buffer, usize len)
         return NET_OK;
     }
 
-    return _net_tcp_send_all_fd(sock->fd, buffer, len, deadline);
+    return _net_tcp_send_all_fd(sock->fd, buffer, len, deadline, nonblocking);
 }
 
 //------------------------------------------------------------------------------
@@ -692,8 +814,11 @@ Net_Result _net_tcp_send(Net_Socket* sock, const void* buffer, usize len)
 
 Net_Result _net_tcp_recv_message(Net_Socket* sock)
 {
-    TimePoint deadline = _net_timeout_deadline_from_option(
-        _net_socket_data(sock)->options.recv_timeout_ms);
+    bool      nonblocking = _net_socket_nonblocking(sock);
+    TimePoint deadline =
+        nonblocking ? time_now()
+                    : _net_timeout_deadline_from_option(
+                          _net_socket_data(sock)->options.recv_timeout_ms);
 
     if (sock->state == NET_STATE_CONNECTED) {
         return _net_tcp_recv_message_from_fd(sock, sock->fd, NULL, deadline);

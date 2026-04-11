@@ -147,6 +147,8 @@ cstr net_result_string(Net_Result result)
         return "bad message";
     case NET_TIMEOUT:
         return "timed out";
+    case NET_WOULD_BLOCK:
+        return "would block";
     case NET_CLOSED:
         return "connection closed";
     case NET_ERROR:
