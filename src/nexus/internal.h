@@ -57,6 +57,7 @@ typedef struct {
     usize     pending_message_capacity;
     usize     max_message_size;
     u32       next_pipe_id;
+    bool      reqrep_send_next;
     bool      has_pending_message;
 } Net_SocketData;
 
@@ -71,11 +72,12 @@ struct Net_TransportOps {
 };
 
 struct Net_PatternOps {
-    Net_Result (*send)(Net_Socket* sock, const void* buffer, usize len);
+    Net_Result (*send)(Net_Message* msg);
     Net_Result (*recv)(Net_Socket* sock,
                        void*       buffer,
                        usize       len,
-                       usize*      out_recv_len);
+                       usize*      out_recv_len,
+                       Net_Pipe**  out_pipe);
 };
 
 //------------------------------------------------------------------------------
@@ -99,17 +101,19 @@ void            _net_socket_store_pending(Net_Socket* sock,
                                           const void* buffer,
                                           usize       len,
                                           Net_Pipe*   pipe);
-Net_Result _net_socket_send(Net_Socket* sock, const void* buffer, usize len);
-Net_Result _net_socket_recv(Net_Socket* sock,
-                            void*       buffer,
-                            usize       len,
-                            usize*      out_recv_len);
-Net_Result _net_socket_consume_pending(Net_Socket* sock,
-                                       void*       buffer,
-                                       usize       len,
-                                       usize*      out_recv_len);
-void       _net_endpoint_to_addr(Net_Endpoint*       endpoint,
-                                 struct sockaddr_in* out_addr);
+Net_Result      _net_socket_send(Net_Message* msg);
+Net_Result      _net_socket_recv(Net_Socket* sock,
+                                 void*       buffer,
+                                 usize       len,
+                                 usize*      out_recv_len,
+                                 Net_Pipe**  out_pipe);
+Net_Result      _net_socket_consume_pending(Net_Socket* sock,
+                                            void*       buffer,
+                                            usize       len,
+                                            usize*      out_recv_len,
+                                            Net_Pipe**  out_pipe);
+void            _net_endpoint_to_addr(Net_Endpoint*       endpoint,
+                                      struct sockaddr_in* out_addr);
 
 //------------------------------------------------------------------------------
 // Pipe helpers
@@ -123,11 +127,18 @@ Net_Result _net_pipe_send(Net_Pipe* pipe, const void* buffer, usize len);
 //------------------------------------------------------------------------------
 // Pattern entry points
 
-Net_Result _net_message_send(Net_Socket* sock, const void* buffer, usize len);
+Net_Result _net_message_send(Net_Message* msg);
 Net_Result _net_message_recv(Net_Socket* sock,
                              void*       buffer,
                              usize       len,
-                             usize*      out_recv_len);
+                             usize*      out_recv_len,
+                             Net_Pipe**  out_pipe);
+Net_Result _net_reqrep_send(Net_Message* msg);
+Net_Result _net_reqrep_recv(Net_Socket* sock,
+                            void*       buffer,
+                            usize       len,
+                            usize*      out_recv_len,
+                            Net_Pipe**  out_pipe);
 
 //------------------------------------------------------------------------------
 // Transport entry points

@@ -353,20 +353,7 @@ bool net_message_read_u64(Net_Message* msg, u64* out_value)
 // Sends the message body over the message's associated socket.
 //------------------------------------------------------------------------------
 
-Net_Result net_send(Net_Message* msg)
-{
-    if (!msg->socket) {
-        return NET_NOT_CONNECTED;
-    }
-
-    Net_MessageData* data = msg->internal_data;
-    if (data && data->pipe) {
-        // Reply via the originating pipe when the message carries one.
-        return _net_pipe_send(data->pipe, msg->data, msg->length);
-    }
-
-    return _net_socket_send(msg->socket, msg->data, msg->length);
-}
+Net_Result net_send(Net_Message* msg) { return _net_socket_send(msg); }
 
 //------------------------------------------------------------------------------
 // net_recv
@@ -380,34 +367,15 @@ Net_Result net_recv(Net_Message* msg)
         return NET_NOT_CONNECTED;
     }
 
-    Net_SocketData* socket_data = _net_socket_data(msg->socket);
     if (msg->capacity == 0) {
         _net_message_ensure_capacity(msg, 1);
     }
 
-    if (!socket_data || !socket_data->transport_ops ||
-        !socket_data->transport_ops->recv_message) {
-        return NET_NOT_CONNECTED;
-    }
-
     while (true) {
-        if (!socket_data->has_pending_message) {
-            Net_Result result =
-                socket_data->transport_ops->recv_message(msg->socket);
-            if (NET_FAILED(result)) {
-                return result;
-            }
-        }
-
-        if (socket_data->pending_pipe) {
-            _net_message_set_pipe(msg, socket_data->pending_pipe);
-        } else {
-            _net_message_clear_pipe(msg);
-        }
-
         usize      recv_len = 0;
-        Net_Result result   = _net_socket_consume_pending(
-            msg->socket, msg->data, msg->capacity, &recv_len);
+        Net_Pipe*  pipe     = NULL;
+        Net_Result result   = _net_socket_recv(
+            msg->socket, msg->data, msg->capacity, &recv_len, &pipe);
         if (result == NET_BUFFER_TOO_SMALL) {
             _net_message_ensure_capacity(msg, recv_len == 0 ? 1 : recv_len);
             continue;
@@ -415,6 +383,12 @@ Net_Result net_recv(Net_Message* msg)
 
         if (NET_FAILED(result)) {
             return result;
+        }
+
+        if (pipe) {
+            _net_message_set_pipe(msg, pipe);
+        } else {
+            _net_message_clear_pipe(msg);
         }
 
         msg->length = recv_len;

@@ -18,6 +18,34 @@ The immediate objective is to make TCP behave like a message transport via
 explicit framing, while preserving a small API surface and not overcommitting
 to a large runtime design too early.
 
+## Current Status
+
+The following work is now in place:
+
+- TCP message framing
+- UDP datagram support
+- message-only public send/receive API
+- reusable `Net_Message` objects
+- hidden pipe-based reply routing
+- multi-client TCP server support
+- socket options for:
+  - connect retry
+  - connect timeout
+  - send timeout
+  - receive timeout
+  - non-blocking mode
+- tests for Nexus behaviour in the shared test framework
+
+The active remaining product work is now:
+
+- request/reply socket kinds
+- telnet-oriented socket behaviour
+- documentation beyond the overview README, especially how-to guides under
+  `docs/how-to/nexus`
+
+Older sections below record the design path that got the module here. Where
+they disagree with the current implementation, the implementation wins.
+
 ## Design Direction
 
 ### 0. Code organization rules
@@ -258,7 +286,8 @@ be cleaner to hide implementation details behind an opaque type.
 
 ## Phase 3: Request/Reply and Other Socket Kinds
 
-After TCP framing is stable, add higher-level socket constructors.
+After the message and pipe foundations are stable, add higher-level socket
+constructors.
 
 Initial candidates:
 
@@ -273,6 +302,8 @@ Planned behaviour:
 - basic sockets use:
   - TCP with framing
   - UDP with datagrams
+
+Request/reply is now the next active implementation step.
 
 The important architectural point is that these constructors choose pattern
 behaviour first, and transport support second.

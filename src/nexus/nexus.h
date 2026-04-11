@@ -53,6 +53,7 @@ typedef enum {
     NET_BAD_MESSAGE,      // The remote side sent an invalid message
     NET_TIMEOUT,          // An operation timed out before it could complete
     NET_WOULD_BLOCK,      // A non-blocking operation could not proceed yet
+    NET_WRONG_STATE,      // The current socket pattern state forbids this op
     NET_CLOSED,           // The peer closed the connection
     NET_ERROR,            // A general error occurred - dev needs to investigate
 } Net_Result;
@@ -70,6 +71,8 @@ typedef enum : u8 {
 
 typedef enum : u8 {
     NET_SOCKET_BASIC,
+    NET_SOCKET_REQUEST,
+    NET_SOCKET_REPLY,
 } Net_Socket_Kind;
 
 typedef enum {
@@ -115,6 +118,14 @@ typedef struct {
 // Create a socket handle in the disconnected state. The handle itself does not
 // allocate network resources until `net_bind` or `net_connect` succeeds.
 Net_Socket net_socket(void);
+
+// Create a request socket. Request sockets must send first, then receive, and
+// continue alternating in that order.
+Net_Socket net_request_socket(void);
+
+// Create a reply socket. Reply sockets must receive first, then send, and
+// continue alternating in that order.
+Net_Socket net_reply_socket(void);
 
 // Close the socket and free any private message-framing state.
 void net_close(Net_Socket* sock);

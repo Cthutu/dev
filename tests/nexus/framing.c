@@ -1,7 +1,10 @@
 //> use: core nexus thread
 
+#include <arpa/inet.h>
 #include <core/core.h>
+#include <netinet/in.h>
 #include <nexus/nexus.h>
+#include <sys/socket.h>
 #include <test.h>
 #include <thread/thread.h>
 #include <unistd.h>
@@ -17,15 +20,35 @@ typedef struct {
 
 internal void _nexus_wait_for_server_start(void) { thread_sleep_ms(50); }
 
+internal u16 _nexus_choose_test_port(int sock_type, int proto)
+{
+    int fd = socket(AF_INET, sock_type, proto);
+    ASSERT(fd >= 0, "Failed to create test socket");
+
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+    struct sockaddr_in addr = {
+        .sin_family      = AF_INET,
+        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
+        .sin_port        = 0,
+    };
+
+    ASSERT(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0,
+           "Failed to bind test socket");
+
+    socklen_t addr_len = sizeof(addr);
+    ASSERT(getsockname(fd, (struct sockaddr*)&addr, &addr_len) == 0,
+           "Failed to query test socket port");
+
+    close(fd);
+    return ntohs(addr.sin_port);
+}
+
 internal void _nexus_make_test_url(char* out_url, usize out_url_size)
 {
-    static u16 next_port = 18080;
-
-    next_port++;
-    snprintf(out_url,
-             out_url_size,
-             "tcp://127.0.0.1:%u",
-             (unsigned)(next_port + (u16)(getpid() % 1000) * 10));
+    u16 port = _nexus_choose_test_port(SOCK_STREAM, IPPROTO_TCP);
+    snprintf(out_url, out_url_size, "tcp://127.0.0.1:%u", (unsigned)port);
 }
 
 //------------------------------------------------------------------------------

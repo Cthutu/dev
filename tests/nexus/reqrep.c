@@ -1,0 +1,193 @@
+//> use: core nexus thread
+
+#include <arpa/inet.h>
+#include <core/core.h>
+#include <netinet/in.h>
+#include <nexus/nexus.h>
+#include <sys/socket.h>
+#include <test.h>
+#include <thread/thread.h>
+#include <unistd.h>
+
+typedef struct {
+    char       url[64];
+    Net_Result bind_result;
+    Net_Result recv_result;
+    Net_Result send_result;
+    string     request_text;
+    u32        request_id;
+} ReqRepServerArgs;
+
+internal u16 _nexus_choose_test_port(int sock_type, int proto)
+{
+    int fd = socket(AF_INET, sock_type, proto);
+    ASSERT(fd >= 0, "Failed to create test socket");
+
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+    struct sockaddr_in addr = {
+        .sin_family      = AF_INET,
+        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
+        .sin_port        = 0,
+    };
+
+    ASSERT(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0,
+           "Failed to bind test socket");
+
+    socklen_t addr_len = sizeof(addr);
+    ASSERT(getsockname(fd, (struct sockaddr*)&addr, &addr_len) == 0,
+           "Failed to query test socket port");
+
+    close(fd);
+    return ntohs(addr.sin_port);
+}
+
+internal void _nexus_make_reqrep_test_url(char* out_url, usize out_url_size)
+{
+    u16 port = _nexus_choose_test_port(SOCK_STREAM, IPPROTO_TCP);
+    snprintf(out_url, out_url_size, "tcp://127.0.0.1:%u", (unsigned)port);
+}
+
+internal void _nexus_make_reqrep_udp_test_url(char* out_url, usize out_url_size)
+{
+    u16 port = _nexus_choose_test_port(SOCK_DGRAM, IPPROTO_UDP);
+    snprintf(out_url, out_url_size, "udp://127.0.0.1:%u", (unsigned)port);
+}
+
+internal void _nexus_reqrep_wait_for_server_start(void) { thread_sleep_ms(50); }
+
+internal void* _nexus_reply_server_round_trip(void* arg)
+{
+    ReqRepServerArgs* args = arg;
+
+    Net_Socket sock        = net_reply_socket();
+    args->bind_result      = net_bind(&sock, args->url);
+    if (NET_FAILED(args->bind_result)) {
+        return NULL;
+    }
+
+    Net_Message msg   = net_message_create(&sock);
+    args->recv_result = net_recv(&msg);
+    if (args->recv_result == NET_OK) {
+        TEST_ASSERT(net_message_read_string(&msg, &args->request_text));
+        TEST_ASSERT(net_message_read_u32(&msg, &args->request_id));
+
+        net_message_clear(&msg);
+        net_message_append_string(&msg, S("reply"));
+        net_message_append_u32(&msg, args->request_id + 1);
+        args->send_result = net_send(&msg);
+    }
+
+    net_message_done(&msg);
+    net_close(&sock);
+    return NULL;
+}
+
+TEST_CASE(nexus, request_reply_round_trip_over_tcp)
+{
+    ReqRepServerArgs server_args = {0};
+    _nexus_make_reqrep_test_url(server_args.url, sizeof(server_args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_reply_server_round_trip, &server_args));
+
+    _nexus_reqrep_wait_for_server_start();
+
+    Net_Socket client = net_request_socket();
+    TEST_ASSERT_EQ(net_connect(&client, server_args.url), NET_OK);
+
+    Net_Message msg = net_message_create(&client);
+    net_message_append_string(&msg, S("request"));
+    net_message_append_u32(&msg, 41);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    TEST_ASSERT_EQ(net_recv(&msg), NET_OK);
+
+    string reply_text;
+    u32    reply_id = 0;
+    TEST_ASSERT(net_message_read_string(&msg, &reply_text));
+    TEST_ASSERT(net_message_read_u32(&msg, &reply_id));
+
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.send_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.request_text.count, (usize)7);
+    TEST_ASSERT_MEM_EQ(server_args.request_text.data, "request", 7);
+    TEST_ASSERT_EQ(server_args.request_id, 41u);
+    TEST_ASSERT_EQ(reply_text.count, (usize)5);
+    TEST_ASSERT_MEM_EQ(reply_text.data, "reply", 5);
+    TEST_ASSERT_EQ(reply_id, 42u);
+
+    net_message_done(&msg);
+    net_close(&client);
+}
+
+TEST_CASE(nexus, request_socket_cannot_receive_before_sending)
+{
+    char url[64];
+    _nexus_make_reqrep_udp_test_url(url, sizeof(url));
+
+    Net_Socket server = net_reply_socket();
+    TEST_ASSERT_EQ(net_bind(&server, url), NET_OK);
+
+    Net_Socket client = net_request_socket();
+    TEST_ASSERT_EQ(net_connect(&client, url), NET_OK);
+
+    Net_Message msg = net_message_create(&client);
+
+    TEST_ASSERT_EQ(net_recv(&msg), NET_WRONG_STATE);
+
+    net_message_done(&msg);
+    net_close(&client);
+    net_close(&server);
+}
+
+TEST_CASE(nexus, request_socket_cannot_send_twice_without_reply)
+{
+    Net_Socket sock              = net_request_socket();
+
+    ReqRepServerArgs server_args = {0};
+    _nexus_make_reqrep_test_url(server_args.url, sizeof(server_args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_reply_server_round_trip, &server_args));
+
+    _nexus_reqrep_wait_for_server_start();
+    TEST_ASSERT_EQ(net_connect(&sock, server_args.url), NET_OK);
+
+    Net_Message msg = net_message_create(&sock);
+    net_message_append_string(&msg, S("one"));
+    net_message_append_u32(&msg, 7);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    net_message_clear(&msg);
+    net_message_append_string(&msg, S("two"));
+    TEST_ASSERT_EQ(net_send(&msg), NET_WRONG_STATE);
+
+    TEST_ASSERT_EQ(net_recv(&msg), NET_OK);
+
+    net_message_done(&msg);
+    net_close(&sock);
+    thread_join(&server_thread);
+}
+
+TEST_CASE(nexus, reply_socket_cannot_send_before_receiving)
+{
+    char url[64];
+    _nexus_make_reqrep_udp_test_url(url, sizeof(url));
+
+    Net_Socket sock = net_reply_socket();
+    TEST_ASSERT_EQ(net_bind(&sock, url), NET_OK);
+
+    Net_Message msg = net_message_create(&sock);
+
+    TEST_ASSERT_EQ(net_send(&msg), NET_WRONG_STATE);
+
+    net_message_done(&msg);
+    net_close(&sock);
+}

@@ -8,6 +8,7 @@ supports:
 
 - TCP message transport with internal length-prefixed framing
 - UDP datagram transport
+- basic, request, and reply socket kinds
 - reusable message objects
 - multi-client TCP servers behind a single bound socket
 - per-socket options for connect retry, timeouts, and non-blocking behaviour
@@ -44,11 +45,47 @@ originating peer.
 
 Typical usage is:
 
-1. create a socket with `net_socket()`
+1. create a socket with `net_socket()`, `net_request_socket()`, or
+   `net_reply_socket()`
 2. `net_connect()` for a client or `net_bind()` for a server
 3. create a `Net_Message` with `net_message_create(&socket)`
 4. send and receive messages
 5. clean up with `net_message_done()` and `net_close()`
+
+## Socket kinds
+
+### Basic sockets
+
+Create with `net_socket()`.
+
+Basic sockets expose plain message send/receive behaviour without imposing any
+ ordering rules. They are the most flexible low-level Nexus socket kind.
+
+### Request sockets
+
+Create with `net_request_socket()`.
+
+Request sockets enforce this sequence:
+
+1. send a request
+2. receive a reply
+3. repeat
+
+Trying to receive before sending, or sending two requests in a row, returns
+`NET_WRONG_STATE`.
+
+### Reply sockets
+
+Create with `net_reply_socket()`.
+
+Reply sockets enforce the opposite sequence:
+
+1. receive a request
+2. send a reply
+3. repeat
+
+Trying to send before receiving, or receiving two requests in a row without
+replying, returns `NET_WRONG_STATE`.
 
 ## URLs
 

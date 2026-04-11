@@ -20,6 +20,11 @@ internal const Net_PatternOps _net_message_pattern_ops = {
     .recv = _net_message_recv,
 };
 
+internal const Net_PatternOps _net_reqrep_pattern_ops = {
+    .send = _net_reqrep_send,
+    .recv = _net_reqrep_recv,
+};
+
 //------------------------------------------------------------------------------
 // _net_socket_data
 //
@@ -50,6 +55,7 @@ Net_SocketData* _net_socket_data_ensure(Net_Socket* sock)
         data->options.send_timeout_ms       = NET_WAIT_INFINITE;
         data->options.recv_timeout_ms       = NET_WAIT_INFINITE;
         data->options.nonblocking           = 0;
+        data->reqrep_send_next              = false;
         sock->internal_data                 = data;
     }
     return data;
@@ -87,6 +93,38 @@ Net_Socket net_socket(void)
     };
 
     _net_socket_set_ops(&sock, NULL, &_net_message_pattern_ops);
+    return sock;
+}
+
+//------------------------------------------------------------------------------
+// net_request_socket
+//
+// Creates a request socket. Request sockets must send first, then receive,
+// repeating that request/reply order for each exchange.
+//------------------------------------------------------------------------------
+
+Net_Socket net_request_socket(void)
+{
+    Net_Socket sock = net_socket();
+    sock.kind       = NET_SOCKET_REQUEST;
+    _net_socket_set_ops(&sock, NULL, &_net_reqrep_pattern_ops);
+    _net_socket_data_ensure(&sock)->reqrep_send_next = true;
+    return sock;
+}
+
+//------------------------------------------------------------------------------
+// net_reply_socket
+//
+// Creates a reply socket. Reply sockets must receive first, then send,
+// repeating that receive/reply order for each exchange.
+//------------------------------------------------------------------------------
+
+Net_Socket net_reply_socket(void)
+{
+    Net_Socket sock = net_socket();
+    sock.kind       = NET_SOCKET_REPLY;
+    _net_socket_set_ops(&sock, NULL, &_net_reqrep_pattern_ops);
+    _net_socket_data_ensure(&sock)->reqrep_send_next = false;
     return sock;
 }
 
@@ -149,6 +187,8 @@ cstr net_result_string(Net_Result result)
         return "timed out";
     case NET_WOULD_BLOCK:
         return "would block";
+    case NET_WRONG_STATE:
+        return "wrong state";
     case NET_CLOSED:
         return "connection closed";
     case NET_ERROR:
@@ -281,7 +321,8 @@ void _net_socket_store_pending(Net_Socket* sock,
 Net_Result _net_socket_consume_pending(Net_Socket* sock,
                                        void*       buffer,
                                        usize       len,
-                                       usize*      out_recv_len)
+                                       usize*      out_recv_len,
+                                       Net_Pipe**  out_pipe)
 {
     Net_SocketData* data = _net_socket_data(sock);
     if (!data || !data->has_pending_message) {
@@ -292,6 +333,9 @@ Net_Result _net_socket_consume_pending(Net_Socket* sock,
         // Always report the full pending size so the caller can size a retry
         // buffer correctly.
         *out_recv_len = data->pending_message_len;
+    }
+    if (out_pipe) {
+        *out_pipe = data->pending_pipe;
     }
 
     if (!buffer) {
@@ -448,14 +492,19 @@ Net_Result net_get_option(Net_Socket* sock, Net_Option option, u64* out_value)
 // payload stored in a `Net_Message`.
 //------------------------------------------------------------------------------
 
-Net_Result _net_socket_send(Net_Socket* sock, const void* buffer, usize len)
+Net_Result _net_socket_send(Net_Message* msg)
 {
+    if (!msg || !msg->socket) {
+        return NET_NOT_CONNECTED;
+    }
+
+    Net_Socket*     sock = msg->socket;
     Net_SocketData* data = _net_socket_data(sock);
     if (!data || !data->pattern_ops || !data->pattern_ops->send) {
         return NET_NOT_CONNECTED;
     }
 
-    return data->pattern_ops->send(sock, buffer, len);
+    return data->pattern_ops->send(msg);
 }
 
 //------------------------------------------------------------------------------
@@ -466,15 +515,18 @@ Net_Result _net_socket_send(Net_Socket* sock, const void* buffer, usize len)
 // before touching the network again.
 //------------------------------------------------------------------------------
 
-Net_Result
-_net_socket_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len)
+Net_Result _net_socket_recv(Net_Socket* sock,
+                            void*       buffer,
+                            usize       len,
+                            usize*      out_recv_len,
+                            Net_Pipe**  out_pipe)
 {
     Net_SocketData* data = _net_socket_data(sock);
     if (!data || !data->pattern_ops || !data->pattern_ops->recv) {
         return NET_NOT_CONNECTED;
     }
 
-    return data->pattern_ops->recv(sock, buffer, len, out_recv_len);
+    return data->pattern_ops->recv(sock, buffer, len, out_recv_len, out_pipe);
 }
 
 //------------------------------------------------------------------------------

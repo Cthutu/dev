@@ -7,29 +7,51 @@
 #include <nexus/internal.h>
 
 //------------------------------------------------------------------------------
+// _net_message_pipe
+//
+// Fetches any hidden reply pipe associated with a message.
+//------------------------------------------------------------------------------
+
+internal Net_Pipe* _net_message_pipe(Net_Message* msg)
+{
+    Net_MessageData* data = msg->internal_data;
+    return data ? data->pipe : NULL;
+}
+
+//------------------------------------------------------------------------------
 // _net_message_send
 //
 // Implements the default message-pattern send path. This layer is responsible
 // for message-sized validation and dispatching to the active transport.
 //------------------------------------------------------------------------------
 
-Net_Result _net_message_send(Net_Socket* sock, const void* buffer, usize len)
+Net_Result _net_message_send(Net_Message* msg)
 {
-    Net_SocketData* data = _net_socket_data(sock);
-
-    if (sock->state != NET_STATE_CONNECTED) {
+    Net_Socket* sock = msg->socket;
+    if (!sock) {
         return NET_NOT_CONNECTED;
     }
+
+    Net_SocketData* data = _net_socket_data(sock);
 
     if (!data || !data->transport_ops || !data->transport_ops->send) {
         return NET_NOT_CONNECTED;
     }
 
-    if (len > data->max_message_size) {
+    if (msg->length > data->max_message_size) {
         return NET_BAD_MESSAGE;
     }
 
-    return data->transport_ops->send(sock, buffer, len);
+    Net_Pipe* pipe = _net_message_pipe(msg);
+    if (pipe) {
+        return _net_pipe_send(pipe, msg->data, msg->length);
+    }
+
+    if (sock->state != NET_STATE_CONNECTED) {
+        return NET_NOT_CONNECTED;
+    }
+
+    return data->transport_ops->send(sock, msg->data, msg->length);
 }
 
 //------------------------------------------------------------------------------
@@ -43,7 +65,8 @@ Net_Result _net_message_send(Net_Socket* sock, const void* buffer, usize len)
 Net_Result _net_message_recv(Net_Socket* sock,
                              void*       buffer,
                              usize       len,
-                             usize*      out_recv_len)
+                             usize*      out_recv_len,
+                             Net_Pipe**  out_pipe)
 {
     Net_SocketData* data = _net_socket_data(sock);
 
@@ -65,7 +88,8 @@ Net_Result _net_message_recv(Net_Socket* sock,
         }
     }
 
-    return _net_socket_consume_pending(sock, buffer, len, out_recv_len);
+    return _net_socket_consume_pending(
+        sock, buffer, len, out_recv_len, out_pipe);
 }
 
 //------------------------------------------------------------------------------
