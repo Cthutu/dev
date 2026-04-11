@@ -63,14 +63,14 @@ typedef enum : u8 {
 } Net_Protocol;
 
 typedef enum : u8 {
-    NET_KIND_MESSAGE,
-} Net_Kind;
+    NET_SOCKET_BASIC,
+} Net_Socket_Kind;
 
 typedef struct {
-    Net_State    state;
-    int          fd; // Socket file descriptor
-    Net_Protocol proto;
-    Net_Kind     kind;
+    Net_State       state;
+    int             fd; // Socket file descriptor
+    Net_Protocol    proto;
+    Net_Socket_Kind kind;
 
     // Private implementation state. Callers should treat these fields as
     // unstable and avoid depending on them directly.

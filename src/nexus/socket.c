@@ -12,7 +12,7 @@
 //------------------------------------------------------------------------------
 // _net_message_pattern_ops
 //
-// Pattern operations for the default message socket kind.
+// Pattern operations for the default basic socket kind.
 //------------------------------------------------------------------------------
 
 internal const Net_PatternOps _net_message_pattern_ops = {
@@ -78,7 +78,7 @@ Net_Socket net_socket(void)
     Net_Socket sock = (Net_Socket){
         .state = NET_STATE_DISCONNECTED,
         .fd    = -1,
-        .kind  = NET_KIND_MESSAGE,
+        .kind  = NET_SOCKET_BASIC,
     };
 
     _net_socket_set_ops(&sock, NULL, &_net_message_pattern_ops);
