@@ -16,6 +16,9 @@ test *args: python-env
 test-release *args: python-env
     build/.venv/bin/python build/test.py -r {{args}}
 
+format: python-env
+    build/.venv/bin/python build/format.py
+
 run proj *args: (build proj)
     _bin/{{proj}}-debug {{args}}
 
@@ -31,6 +34,7 @@ alias b := build
 alias br := build-release
 alias t := test
 alias tr := test-release
+alias f := format
 alias r := run
 alias rr := run-release
 alias c := clean
