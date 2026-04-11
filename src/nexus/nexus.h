@@ -41,17 +41,29 @@ typedef enum {
     // etc).
     NET_PORT_IN_USE,   // The port is already in use by another socket
     NET_ACCESS_DENIED, // Permission denied when trying to bind to the port
+    NET_SOCKET_BUSY,   // The socket is already in use (e.g. trying to bind or
+                       // connect a socket that's already connected or bound)
+    NET_NOT_CONNECTED, // The socket is not ready for send/recv yet
+    NET_CLOSED,        // The peer closed the connection
     NET_ERROR,         // A general error occurred - dev needs to investigate
 } Net_Result;
 
-typedef struct {
-    int fd; // Socket file descriptor
-} Net_Socket;
+typedef enum {
+    NET_STATE_DISCONNECTED,
+    NET_STATE_WAITING_CONNECTION,
+    NET_STATE_CONNECTED,
+} Net_State;
 
 typedef enum : u8 {
     NET_PROTO_TCP,
     NET_PROTO_UDP,
 } Net_Protocol;
+
+typedef struct {
+    Net_State    state;
+    int          fd; // Socket file descriptor
+    Net_Protocol proto;
+} Net_Socket;
 
 typedef struct {
     u8           ip[16]; // IPv6 address (or IPv4-mapped IPv6)
