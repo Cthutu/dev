@@ -191,6 +191,10 @@ Net_Result _net_tcp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
         }
     }
 
+    int reuse_addr = 1;
+    (void)setsockopt(
+        fd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+
     struct sockaddr_in addr;
     _net_endpoint_to_addr(endpoint, &addr);
 
