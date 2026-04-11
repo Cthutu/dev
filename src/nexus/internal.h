@@ -39,8 +39,17 @@ struct Net_Pipe {
 };
 
 typedef struct {
+    u64 connect_timeout_ms;
+    u64 reconnect_interval_ms;
+    u64 send_timeout_ms;
+    u64 recv_timeout_ms;
+    u64 nonblocking;
+} Net_SocketOptions;
+
+typedef struct {
     const Net_TransportOps* transport_ops;
     const Net_PatternOps*   pattern_ops;
+    Net_SocketOptions       options;
     Array(Net_Pipe*) pipes;
     void*     pending_message;
     Net_Pipe* pending_pipe;
@@ -90,12 +99,17 @@ void            _net_socket_store_pending(Net_Socket* sock,
                                           const void* buffer,
                                           usize       len,
                                           Net_Pipe*   pipe);
-Net_Result      _net_socket_consume_pending(Net_Socket* sock,
-                                            void*       buffer,
-                                            usize       len,
-                                            usize*      out_recv_len);
-void            _net_endpoint_to_addr(Net_Endpoint*       endpoint,
-                                      struct sockaddr_in* out_addr);
+Net_Result _net_socket_send(Net_Socket* sock, const void* buffer, usize len);
+Net_Result _net_socket_recv(Net_Socket* sock,
+                            void*       buffer,
+                            usize       len,
+                            usize*      out_recv_len);
+Net_Result _net_socket_consume_pending(Net_Socket* sock,
+                                       void*       buffer,
+                                       usize       len,
+                                       usize*      out_recv_len);
+void       _net_endpoint_to_addr(Net_Endpoint*       endpoint,
+                                 struct sockaddr_in* out_addr);
 
 //------------------------------------------------------------------------------
 // Pipe helpers

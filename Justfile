@@ -38,3 +38,9 @@ alias f := format
 alias r := run
 alias rr := run-release
 alias c := clean
+
+test-network:
+    just run demo-server &
+    sleep 0.2
+    just run demo-client
+    wait

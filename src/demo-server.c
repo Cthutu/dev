@@ -22,24 +22,22 @@ int run(int argc, char* argv[])
     }
 
     prn("Bound to %s", url);
+    prn("Waiting for 10 incoming messages...");
 
-    u8    buffer[1024];
-    usize recv_len;
-
-    prn("Waiting for incoming messages...");
     Net_Message msg = net_message_create(&sock);
+    for (int i = 0; i < 10; ++i) {
+        result = net_recv(&msg);
+        if (NET_FAILED(result)) {
+            kill("Failed to receive data: %s", net_result_string(result));
+        }
 
-    result          = net_recv_msg(&msg);
-    if (NET_FAILED(result)) {
-        kill("Failed to receive data: %s", net_result_string(result));
+        string text_msg;
+        if (!net_message_read_string(&msg, &text_msg)) {
+            kill("Failed to read message");
+        }
+
+        prn("Received message %d/10: " STRINGP, i + 1, STRINGV(text_msg));
     }
-
-    string text_msg;
-    if (!net_message_read_string(&msg, &text_msg)) {
-        kill("Failed to read message");
-    }
-
-    prn("Received message: " STRINGP, STRINGV(text_msg));
     net_message_done(&msg);
 
     net_close(&sock);

@@ -11,24 +11,28 @@
 //
 //      1. Create a socket with net_socket().
 //      2. Connect to a URL via the socket: net_connect(socket, url)
-//      3. Send and receive messages over the socket.
-//          - net_send(socket, buffer, len)
-//          - net_recv(socket, buffer, len, recv_len)
+//      3. Create a message with net_message_create(&socket)
+//      4. Send and receive messages over the socket.
+//          - net_send(&message)
+//          - net_recv(&message)
 //      4. When done close socket: net_close(sock)
 //
 // Server:
 //
 //      1. Create a socket with net_socket().
 //      2. Bind to a socket to recevie messages: net_bind(socket, url)
-//      3. Send and receive messages over the socket.
-//          - net_send(socket, buffer, len)
-//          - net_recv(socket, buffer, len, recv_len)
+//      3. Create a message with net_message_create(&socket)
+//      4. Send and receive messages over the socket.
+//          - net_send(&message)
+//          - net_recv(&message)
 //      4. When done close socket: net_close(sock)
 //------------------------------------------------------------------------------
 // Macros
 
 #define NET_FAILED(result) ((result) != NET_OK)
 #define NET_MAX_MESSAGE_SIZE (1024 * 1024)
+#define NET_WAIT_IMMEDIATE 0ull
+#define NET_WAIT_INFINITE 0xffffffffffffffffull
 
 //------------------------------------------------------------------------------
 // Types
@@ -47,6 +51,7 @@ typedef enum {
     NET_NOT_CONNECTED, // The socket is not ready for send/recv yet
     NET_BUFFER_TOO_SMALL, // Receive buffer cannot hold the full pending message
     NET_BAD_MESSAGE,      // The remote side sent an invalid message
+    NET_TIMEOUT,          // An operation timed out before it could complete
     NET_CLOSED,           // The peer closed the connection
     NET_ERROR,            // A general error occurred - dev needs to investigate
 } Net_Result;
@@ -65,6 +70,14 @@ typedef enum : u8 {
 typedef enum : u8 {
     NET_SOCKET_BASIC,
 } Net_Socket_Kind;
+
+typedef enum {
+    NET_OPT_CONNECT_TIMEOUT_MS,
+    NET_OPT_RECONNECT_INTERVAL_MS,
+    NET_OPT_SEND_TIMEOUT_MS,
+    NET_OPT_RECV_TIMEOUT_MS,
+    NET_OPT_NONBLOCKING,
+} Net_Option;
 
 typedef struct {
     Net_State       state;
@@ -108,35 +121,25 @@ void net_close(Net_Socket* sock);
 // Convert a `Net_Result` into a short readable string suitable for logging.
 cstr net_result_string(Net_Result result);
 
-// Bind a socket to the provided URL. For TCP, the socket becomes a simple
-// single-peer server endpoint and will accept an incoming connection during the
-// first `net_recv`. For UDP, the socket can receive immediately after bind.
+// Bind a socket to the provided URL. For TCP, the socket becomes a server
+// endpoint. For UDP, the socket can receive immediately after bind.
 Net_Result net_bind(Net_Socket* sock, cstr url);
 
 // Connect a socket to the provided URL. For TCP this establishes a connection.
 // For UDP it sets the default peer for future send/recv calls.
 Net_Result net_connect(Net_Socket* sock, cstr url);
 
-// Send one message over the socket. For TCP the message is framed internally
-// with a 4-byte length prefix. For UDP the message is sent as one datagram.
-// Messages larger than `NET_MAX_MESSAGE_SIZE` fail with `NET_BAD_MESSAGE`.
-Net_Result net_send(Net_Socket* sock, const void* buffer, usize len);
-
-// Receive one message from the socket.
+// Set or query per-socket options. Timing options use milliseconds.
 //
-// For TCP, Nexus reads a full framed message and only returns once one complete
-// message is available. For UDP, one datagram is received.
+// `NET_OPT_CONNECT_TIMEOUT_MS` controls how long `net_connect` may keep
+// retrying before it gives up. `NET_WAIT_IMMEDIATE` means one immediate
+// attempt. `NET_WAIT_INFINITE` means retry forever.
 //
-// If the caller buffer is too small, this returns `NET_BUFFER_TOO_SMALL`,
-// leaves the message pending inside the socket, and writes the required payload
-// size to `out_recv_len` when provided.
-//
-// If `buffer == NULL`, the pending message is dropped instead of copied out. If
-// `out_recv_len` is provided, it receives the dropped message size.
-//
-// Zero-length messages are valid.
-Net_Result
-net_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len);
+// `NET_OPT_RECONNECT_INTERVAL_MS` controls the delay between retry attempts
+// when the connect timeout allows waiting. A value of `0` means Nexus uses its
+// default retry interval.
+Net_Result net_set_option(Net_Socket* sock, Net_Option option, u64 value);
+Net_Result net_get_option(Net_Socket* sock, Net_Option option, u64* out_value);
 
 //------------------------------------------------------------------------------
 // Message API
@@ -169,10 +172,16 @@ bool net_message_read_u16(Net_Message* msg, u16* out_value);
 bool net_message_read_u32(Net_Message* msg, u32* out_value);
 bool net_message_read_u64(Net_Message* msg, u64* out_value);
 
-// Send or receive one full message using the socket associated with the
-// message object.
-Net_Result net_send_msg(Net_Message* msg);
-Net_Result net_recv_msg(Net_Message* msg);
+// Send one full message using the socket associated with the message object.
+// For TCP the payload is framed internally with a 4-byte length prefix. For
+// UDP the payload is sent as one datagram. Messages larger than
+// `NET_MAX_MESSAGE_SIZE` fail with `NET_BAD_MESSAGE`.
+Net_Result net_send(Net_Message* msg);
+
+// Receive one full message into the message object, growing its storage as
+// required. For TCP, Nexus reads one complete framed message. For UDP, one
+// datagram is received. Zero-length messages are valid.
+Net_Result net_recv(Net_Message* msg);
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------

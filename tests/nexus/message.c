@@ -49,6 +49,14 @@ typedef struct {
     u32        received_ids[2];
 } MultiClientServerArgs;
 
+typedef struct {
+    char       url[64];
+    u32        bind_delay_ms;
+    Net_Result bind_result;
+    Net_Result recv_result;
+    string     received_string;
+} DelayedBindServerArgs;
+
 internal void _nexus_message_wait_for_server_start(void)
 {
     thread_sleep_ms(50);
@@ -88,7 +96,7 @@ internal void* _nexus_message_server_round_trip(void* arg)
     }
 
     Net_Message msg   = net_message_create(&sock);
-    args->recv_result = net_recv_msg(&msg);
+    args->recv_result = net_recv(&msg);
     if (NET_FAILED(args->recv_result)) {
         net_message_done(&msg);
         net_close(&sock);
@@ -111,7 +119,7 @@ internal void* _nexus_message_server_round_trip(void* arg)
     net_message_append_string(&msg, S("reply"));
     net_message_append_u32(&msg, 0x11223344u);
     net_message_append(&msg, "ok", 2);
-    args->send_result = net_send_msg(&msg);
+    args->send_result = net_send(&msg);
 
     net_message_done(&msg);
     net_close(&sock);
@@ -129,7 +137,7 @@ internal void* _nexus_udp_message_server_round_trip(void* arg)
     }
 
     Net_Message msg   = net_message_create(&sock);
-    args->recv_result = net_recv_msg(&msg);
+    args->recv_result = net_recv(&msg);
     if (NET_FAILED(args->recv_result)) {
         net_message_done(&msg);
         net_close(&sock);
@@ -140,7 +148,7 @@ internal void* _nexus_udp_message_server_round_trip(void* arg)
 
     net_message_clear(&msg);
     net_message_append_string(&msg, S("udp-reply"));
-    args->send_result = net_send_msg(&msg);
+    args->send_result = net_send(&msg);
 
     net_message_done(&msg);
     net_close(&sock);
@@ -159,7 +167,7 @@ internal void* _nexus_multi_client_server_round_trip(void* arg)
 
     Net_Message msg = net_message_create(&sock);
     for (usize i = 0; i < 2; ++i) {
-        args->recv_results[i] = net_recv_msg(&msg);
+        args->recv_results[i] = net_recv(&msg);
         if (NET_FAILED(args->recv_results[i])) {
             break;
         }
@@ -170,7 +178,7 @@ internal void* _nexus_multi_client_server_round_trip(void* arg)
         net_message_clear(&msg);
         net_message_append_string(&msg, args->received_texts[i]);
         net_message_append_u32(&msg, args->received_ids[i]);
-        args->send_results[i] = net_send_msg(&msg);
+        args->send_results[i] = net_send(&msg);
         if (NET_FAILED(args->send_results[i])) {
             break;
         }
@@ -194,7 +202,7 @@ internal void* _nexus_multi_client_round_trip(void* arg)
     Net_Message outbound = net_message_create(&sock);
     net_message_append_string(&outbound, args->request_text);
     net_message_append_u32(&outbound, args->request_id);
-    args->send_result = net_send_msg(&outbound);
+    args->send_result = net_send(&outbound);
     if (NET_FAILED(args->send_result)) {
         net_message_done(&outbound);
         net_close(&sock);
@@ -202,7 +210,7 @@ internal void* _nexus_multi_client_round_trip(void* arg)
     }
 
     Net_Message inbound = net_message_create(&sock);
-    args->recv_result   = net_recv_msg(&inbound);
+    args->recv_result   = net_recv(&inbound);
     if (args->recv_result == NET_OK) {
         string reply_text;
         TEST_ASSERT(net_message_read_string(&inbound, &reply_text));
@@ -215,6 +223,29 @@ internal void* _nexus_multi_client_round_trip(void* arg)
 
     net_message_done(&outbound);
     net_message_done(&inbound);
+    net_close(&sock);
+    return NULL;
+}
+
+internal void* _nexus_delayed_bind_server(void* arg)
+{
+    DelayedBindServerArgs* args = arg;
+
+    thread_sleep_ms(args->bind_delay_ms);
+
+    Net_Socket sock   = net_socket();
+    args->bind_result = net_bind(&sock, args->url);
+    if (NET_FAILED(args->bind_result)) {
+        return NULL;
+    }
+
+    Net_Message msg   = net_message_create(&sock);
+    args->recv_result = net_recv(&msg);
+    if (args->recv_result == NET_OK) {
+        TEST_ASSERT(net_message_read_string(&msg, &args->received_string));
+    }
+
+    net_message_done(&msg);
     net_close(&sock);
     return NULL;
 }
@@ -279,10 +310,10 @@ TEST_CASE(nexus, recv_msg_and_send_msg_round_trip)
     net_message_append_u64(&outbound, 0x0102030405060708ull);
     net_message_append_u8(&outbound, 0x99);
     net_message_append(&outbound, "tail", 4);
-    TEST_ASSERT_EQ(net_send_msg(&outbound), NET_OK);
+    TEST_ASSERT_EQ(net_send(&outbound), NET_OK);
 
     Net_Message inbound = net_message_create(&client_sock);
-    TEST_ASSERT_EQ(net_recv_msg(&inbound), NET_OK);
+    TEST_ASSERT_EQ(net_recv(&inbound), NET_OK);
 
     string reply_text;
     u32    reply_code = 0;
@@ -330,10 +361,10 @@ TEST_CASE(nexus, udp_recv_msg_preserves_reply_route_for_send_msg)
 
     Net_Message outbound = net_message_create(&client_sock);
     net_message_append_string(&outbound, S("udp-request"));
-    TEST_ASSERT_EQ(net_send_msg(&outbound), NET_OK);
+    TEST_ASSERT_EQ(net_send(&outbound), NET_OK);
 
     Net_Message inbound = net_message_create(&client_sock);
-    TEST_ASSERT_EQ(net_recv_msg(&inbound), NET_OK);
+    TEST_ASSERT_EQ(net_recv(&inbound), NET_OK);
 
     string reply_text;
     TEST_ASSERT(net_message_read_string(&inbound, &reply_text));
@@ -410,4 +441,90 @@ TEST_CASE(nexus, tcp_server_can_reply_to_multiple_clients_via_message_pipe)
                        client_b.request_text.data,
                        client_b.request_text.count);
     TEST_ASSERT_EQ(client_b.reply_id, client_b.request_id);
+}
+
+TEST_CASE(nexus, socket_options_can_be_set_and_read_back)
+{
+    Net_Socket sock  = net_socket();
+    u64        value = 0;
+
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_CONNECT_TIMEOUT_MS, 250),
+                   NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_RECONNECT_INTERVAL_MS, 25),
+                   NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_SEND_TIMEOUT_MS, 500), NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_RECV_TIMEOUT_MS, 750), NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&sock, NET_OPT_NONBLOCKING, 1), NET_OK);
+
+    TEST_ASSERT_EQ(net_get_option(&sock, NET_OPT_CONNECT_TIMEOUT_MS, &value),
+                   NET_OK);
+    TEST_ASSERT_EQ(value, 250u);
+    TEST_ASSERT_EQ(net_get_option(&sock, NET_OPT_RECONNECT_INTERVAL_MS, &value),
+                   NET_OK);
+    TEST_ASSERT_EQ(value, 25u);
+    TEST_ASSERT_EQ(net_get_option(&sock, NET_OPT_SEND_TIMEOUT_MS, &value),
+                   NET_OK);
+    TEST_ASSERT_EQ(value, 500u);
+    TEST_ASSERT_EQ(net_get_option(&sock, NET_OPT_RECV_TIMEOUT_MS, &value),
+                   NET_OK);
+    TEST_ASSERT_EQ(value, 750u);
+    TEST_ASSERT_EQ(net_get_option(&sock, NET_OPT_NONBLOCKING, &value), NET_OK);
+    TEST_ASSERT_EQ(value, 1u);
+
+    net_close(&sock);
+}
+
+TEST_CASE(nexus, connect_can_retry_until_server_binds)
+{
+    DelayedBindServerArgs server_args = {
+        .bind_delay_ms = 120,
+    };
+    _nexus_make_message_test_url(server_args.url, sizeof(server_args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(thread_create(
+        &server_thread, _nexus_delayed_bind_server, &server_args));
+
+    Net_Socket client_sock = net_socket();
+    TEST_ASSERT_EQ(
+        net_set_option(&client_sock, NET_OPT_CONNECT_TIMEOUT_MS, 1000), NET_OK);
+    TEST_ASSERT_EQ(
+        net_set_option(&client_sock, NET_OPT_RECONNECT_INTERVAL_MS, 25),
+        NET_OK);
+    TEST_ASSERT_EQ(net_connect(&client_sock, server_args.url), NET_OK);
+
+    Net_Message msg = net_message_create(&client_sock);
+    net_message_append_string(&msg, S("delayed-connect"));
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    net_message_done(&msg);
+    net_close(&client_sock);
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.received_string.count, (usize)15);
+    TEST_ASSERT_MEM_EQ(server_args.received_string.data, "delayed-connect", 15);
+}
+
+TEST_CASE(nexus, connect_times_out_when_server_never_binds)
+{
+    char url[64];
+    _nexus_make_message_test_url(url, sizeof(url));
+
+    Net_Socket client_sock = net_socket();
+    TEST_ASSERT_EQ(
+        net_set_option(&client_sock, NET_OPT_CONNECT_TIMEOUT_MS, 150), NET_OK);
+    TEST_ASSERT_EQ(
+        net_set_option(&client_sock, NET_OPT_RECONNECT_INTERVAL_MS, 25),
+        NET_OK);
+
+    TimePoint  start  = time_now();
+    Net_Result result = net_connect(&client_sock, url);
+    u64 elapsed_ms    = time_duration_to_ms(time_elapsed(start, time_now()));
+
+    TEST_ASSERT_EQ(result, NET_TIMEOUT);
+    TEST_ASSERT_GE(elapsed_ms, 100u);
+
+    net_close(&client_sock);
 }

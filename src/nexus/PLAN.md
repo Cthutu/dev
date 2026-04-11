@@ -392,10 +392,10 @@ Example:
 
 ```c
 Net_Message msg;
-net_recv_msg(&server, &msg);
+net_recv(&msg);
 prn("Received %zu bytes", msg.len);
 net_message_append(&msg, reply.data, reply.count);
-net_send_msg(&server, &msg);
+net_send(&msg);
 ```
 
 Internally, the message identifies where it came from via one pipe:
@@ -476,9 +476,9 @@ That means:
 Build multi-client transport support on top of the existing message-envelope
 API:
 
-- `net_recv_msg`
+- `net_recv`
 - `net_message_append`
-- `net_send_msg`
+- `net_send`
 - optional future pipe inspection helpers if needed
 
 These primitives already support and should be extended to handle:
@@ -524,6 +524,120 @@ For now:
 
 - implement synchronous send/recv first
 - avoid introducing background concurrency until message semantics are stable
+
+## Socket Options Direction
+
+Rather than adding many specialised functions for small behaviour changes,
+`nexus` should grow a socket-options model.
+
+This is the preferred way to configure:
+
+- connection timing behaviour
+- I/O timing behaviour
+- future blocking mode
+- transport and pattern tuning
+
+That keeps the public API smaller and lets the existing socket operations obey
+configured behaviour instead of introducing one function per variation.
+
+### Why use socket options
+
+Options scale better than adding functions such as:
+
+- `net_connect_wait`
+- `net_connect_retry`
+- `net_recv_timeout`
+- `net_set_nonblocking`
+
+Those behaviours are configuration of the same underlying socket rather than
+fundamentally different operations.
+
+The preferred direction is:
+
+- keep `net_connect` as the main connect entry point
+- keep `net_send` and `net_recv` as the main message I/O entry points
+- have those operations respect configured socket options
+
+### Initial option groups
+
+The first useful option groups are:
+
+- connection options
+  - connect timeout
+  - reconnect retry interval
+  - retry-until-available behaviour
+- I/O options
+  - send timeout
+  - receive timeout
+  - future non-blocking mode
+- transport and pattern options
+  - maximum message size
+  - future request/reply-specific tuning
+
+### Connect-before-bind behaviour
+
+If a client starts before a TCP server has bound and begun listening, the
+kernel will reject a plain `connect()` call with `ECONNREFUSED`.
+
+So the desired later behaviour:
+
+- client starts first
+- server binds later
+- connection still succeeds
+
+must be implemented as Nexus-managed retry behaviour on top of normal socket
+connect semantics.
+
+This should be configured through socket options rather than by introducing a
+separate family of connect functions.
+
+### Likely public shape
+
+A likely future shape is:
+
+```c
+typedef enum {
+    NET_OPT_CONNECT_TIMEOUT_MS,
+    NET_OPT_RECONNECT_INTERVAL_MS,
+    NET_OPT_SEND_TIMEOUT_MS,
+    NET_OPT_RECV_TIMEOUT_MS,
+    NET_OPT_NONBLOCKING,
+} Net_Option;
+
+Net_Result net_set_option(Net_Socket* sock, Net_Option option, u64 value);
+Net_Result net_get_option(Net_Socket* sock, Net_Option option, u64* out_value);
+```
+
+Exact names can change, but the direction should be:
+
+- per-socket configuration
+- small, predictable option set
+- behaviour driven by configuration, not API explosion
+
+### Timeout conventions
+
+Timeout-bearing options should support at least:
+
+- immediate / disabled behaviour
+- finite timeout in milliseconds
+- infinite wait
+
+Use an explicit sentinel for infinite wait rather than overloading `0` to mean
+both immediate and infinite behaviour. That keeps the semantics clear.
+
+### Scope for later work
+
+The first socket-options work should likely focus on:
+
+- connect timeout
+- reconnect retry interval
+- infinite retry / wait-forever configuration
+
+Later phases can extend this to:
+
+- send and receive timeouts
+- non-blocking sockets
+- pattern-specific options
 
 ## Memory Management Strategy
 
@@ -775,9 +889,9 @@ Messages should carry hidden `Net_Pipe*` metadata internally.
 
 That means:
 
-- `net_recv_msg` on a TCP server can attach the originating accepted pipe
-- `net_recv_msg` on a UDP socket can attach the remembered sender pipe
-- `net_send_msg` can reply via that pipe without any explicit peer parameter
+- `net_recv` on a TCP server can attach the originating accepted pipe
+- `net_recv` on a UDP socket can attach the remembered sender pipe
+- `net_send` can reply via that pipe without any explicit peer parameter
 
 `net_message_clear` should continue to preserve this hidden pipe association so
 the same message object can be reused for replies.
@@ -801,7 +915,7 @@ For a bound UDP socket:
 
 - a sender can be represented by a UDP pseudo-pipe
 - the pseudo-pipe remembers the sender address
-- `net_send_msg` can reply via that stored address
+- `net_send` can reply via that stored address
 
 This unifies TCP and UDP reply semantics around the same hidden message
 metadata.
@@ -826,7 +940,7 @@ require background threads.
 This phase should include tests proving that:
 
 - one TCP server socket can receive from multiple connected clients
-- replies sent via `net_send_msg` go back to the correct originating TCP pipe
+- replies sent via `net_send` go back to the correct originating TCP pipe
 - UDP pseudo-pipe behaviour still works
 - pipe closure and removal behave correctly
 
@@ -893,6 +1007,9 @@ These have now been resolved for the first implementation:
 6. Internal multi-client transport model:
    - one `Net_Pipe` abstraction for TCP accepted clients and UDP remembered
      peers
+7. Future connection management:
+   - prefer socket options for connect timeout, retry interval, and infinite
+     wait behaviour rather than adding specialised connect functions
 
 ## Recommended Answers
 

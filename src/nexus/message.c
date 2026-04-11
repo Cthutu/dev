@@ -75,7 +75,7 @@ internal void _net_message_clear_pipe(Net_Message* msg)
 }
 
 //------------------------------------------------------------------------------
-// _net_message_set_route
+// _net_message_set_pipe
 //
 // Stores hidden pipe metadata inside the message runtime block.
 //------------------------------------------------------------------------------
@@ -348,12 +348,12 @@ bool net_message_read_u64(Net_Message* msg, u64* out_value)
 }
 
 //------------------------------------------------------------------------------
-// net_send_msg
+// net_send
 //
 // Sends the message body over the message's associated socket.
 //------------------------------------------------------------------------------
 
-Net_Result net_send_msg(Net_Message* msg)
+Net_Result net_send(Net_Message* msg)
 {
     if (!msg->socket) {
         return NET_NOT_CONNECTED;
@@ -365,16 +365,16 @@ Net_Result net_send_msg(Net_Message* msg)
         return _net_pipe_send(data->pipe, msg->data, msg->length);
     }
 
-    return net_send(msg->socket, msg->data, msg->length);
+    return _net_socket_send(msg->socket, msg->data, msg->length);
 }
 
 //------------------------------------------------------------------------------
-// net_recv_msg
+// net_recv
 //
 // Receives one full message into the message body, growing storage as required.
 //------------------------------------------------------------------------------
 
-Net_Result net_recv_msg(Net_Message* msg)
+Net_Result net_recv(Net_Message* msg)
 {
     if (!msg->socket) {
         return NET_NOT_CONNECTED;

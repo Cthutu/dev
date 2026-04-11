@@ -44,8 +44,13 @@ Net_SocketData* _net_socket_data_ensure(Net_Socket* sock)
     if (!data) {
         data  = mem_realloc(NULL, sizeof(*data), __FILE__, __LINE__);
         *data = (Net_SocketData){0};
-        data->max_message_size = NET_MAX_MESSAGE_SIZE;
-        sock->internal_data    = data;
+        data->max_message_size              = NET_MAX_MESSAGE_SIZE;
+        data->options.connect_timeout_ms    = NET_WAIT_IMMEDIATE;
+        data->options.reconnect_interval_ms = NET_WAIT_IMMEDIATE;
+        data->options.send_timeout_ms       = NET_WAIT_IMMEDIATE;
+        data->options.recv_timeout_ms       = NET_WAIT_IMMEDIATE;
+        data->options.nonblocking           = 0;
+        sock->internal_data                 = data;
     }
     return data;
 }
@@ -140,6 +145,8 @@ cstr net_result_string(Net_Result result)
         return "buffer too small";
     case NET_BAD_MESSAGE:
         return "bad message";
+    case NET_TIMEOUT:
+        return "timed out";
     case NET_CLOSED:
         return "connection closed";
     case NET_ERROR:
@@ -365,13 +372,81 @@ Net_Result net_connect(Net_Socket* sock, cstr url)
 }
 
 //------------------------------------------------------------------------------
-// net_send
+// net_set_option
 //
-// Sends one message using the default message pattern for the socket. Transport
-// details such as TCP framing are handled below this API layer.
+// Stores a configuration value in the socket's private runtime state so future
+// operations such as `net_connect` can obey it.
 //------------------------------------------------------------------------------
 
-Net_Result net_send(Net_Socket* sock, const void* buffer, usize len)
+Net_Result net_set_option(Net_Socket* sock, Net_Option option, u64 value)
+{
+    Net_SocketData* data = _net_socket_data_ensure(sock);
+
+    switch (option) {
+    case NET_OPT_CONNECT_TIMEOUT_MS:
+        data->options.connect_timeout_ms = value;
+        return NET_OK;
+    case NET_OPT_RECONNECT_INTERVAL_MS:
+        data->options.reconnect_interval_ms = value;
+        return NET_OK;
+    case NET_OPT_SEND_TIMEOUT_MS:
+        data->options.send_timeout_ms = value;
+        return NET_OK;
+    case NET_OPT_RECV_TIMEOUT_MS:
+        data->options.recv_timeout_ms = value;
+        return NET_OK;
+    case NET_OPT_NONBLOCKING:
+        data->options.nonblocking = value ? 1 : 0;
+        return NET_OK;
+    default:
+        return NET_ERROR;
+    }
+}
+
+//------------------------------------------------------------------------------
+// net_get_option
+//
+// Reads a previously configured socket option from the socket's private state.
+//------------------------------------------------------------------------------
+
+Net_Result net_get_option(Net_Socket* sock, Net_Option option, u64* out_value)
+{
+    if (!out_value) {
+        return NET_ERROR;
+    }
+
+    Net_SocketData* data = _net_socket_data_ensure(sock);
+
+    switch (option) {
+    case NET_OPT_CONNECT_TIMEOUT_MS:
+        *out_value = data->options.connect_timeout_ms;
+        return NET_OK;
+    case NET_OPT_RECONNECT_INTERVAL_MS:
+        *out_value = data->options.reconnect_interval_ms;
+        return NET_OK;
+    case NET_OPT_SEND_TIMEOUT_MS:
+        *out_value = data->options.send_timeout_ms;
+        return NET_OK;
+    case NET_OPT_RECV_TIMEOUT_MS:
+        *out_value = data->options.recv_timeout_ms;
+        return NET_OK;
+    case NET_OPT_NONBLOCKING:
+        *out_value = data->options.nonblocking;
+        return NET_OK;
+    default:
+        return NET_ERROR;
+    }
+}
+
+//------------------------------------------------------------------------------
+// _net_socket_send
+//
+// Sends one raw payload using the active socket pattern. This is an internal
+// helper used by the public message API after it has finished preparing the
+// payload stored in a `Net_Message`.
+//------------------------------------------------------------------------------
+
+Net_Result _net_socket_send(Net_Socket* sock, const void* buffer, usize len)
 {
     Net_SocketData* data = _net_socket_data(sock);
     if (!data || !data->pattern_ops || !data->pattern_ops->send) {
@@ -382,15 +457,15 @@ Net_Result net_send(Net_Socket* sock, const void* buffer, usize len)
 }
 
 //------------------------------------------------------------------------------
-// net_recv
+// _net_socket_recv
 //
-// Receives one message using the default message pattern for the socket. If a
-// previous receive left a message pending, this call consumes or drops that
-// retained message before touching the network again.
+// Receives one raw payload using the active socket pattern. If a previous
+// receive left a message pending, this helper consumes that retained message
+// before touching the network again.
 //------------------------------------------------------------------------------
 
 Net_Result
-net_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len)
+_net_socket_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len)
 {
     Net_SocketData* data = _net_socket_data(sock);
     if (!data || !data->pattern_ops || !data->pattern_ops->recv) {

@@ -25,6 +25,8 @@ internal const Net_TransportOps _net_tcp_transport_ops = {
     .recv_message = _net_tcp_recv_message,
 };
 
+#define NET_DEFAULT_CONNECT_RETRY_INTERVAL_MS 50ull
+
 //------------------------------------------------------------------------------
 // _net_tcp_send_all_fd
 //
@@ -64,6 +66,43 @@ internal Net_Result _net_tcp_send_all_fd(int fd, const u8* buffer, usize len)
     }
 
     return NET_OK;
+}
+
+//------------------------------------------------------------------------------
+// _net_tcp_connect_retry_interval_ms
+//
+// Chooses the retry delay for waiting connects. A zero-valued reconnect option
+// means "use Nexus' default retry interval" rather than busy-spinning.
+//------------------------------------------------------------------------------
+
+internal u64 _net_tcp_connect_retry_interval_ms(Net_Socket* sock)
+{
+    Net_SocketData* data = _net_socket_data_ensure(sock);
+    if (data->options.reconnect_interval_ms > 0) {
+        return data->options.reconnect_interval_ms;
+    }
+
+    return NET_DEFAULT_CONNECT_RETRY_INTERVAL_MS;
+}
+
+//------------------------------------------------------------------------------
+// _net_tcp_should_retry_connect
+//
+// Returns true for the connection errors that are expected while waiting for a
+// server to bind and begin listening.
+//------------------------------------------------------------------------------
+
+internal bool _net_tcp_should_retry_connect(int err)
+{
+    switch (err) {
+    case ECONNREFUSED:
+    case ETIMEDOUT:
+    case EHOSTUNREACH:
+    case ENETUNREACH:
+        return true;
+    default:
+        return false;
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -427,45 +466,78 @@ Net_Result _net_tcp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
 
 Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 {
-    int fd = _net_create_socket(endpoint);
-    if (fd < 0) {
-        _net_log_error();
-        switch (errno) {
-        case EMFILE:
-        case ENFILE:
-            return NET_OUT_OF_FD;
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EPROTONOSUPPORT:
-            return NET_PROTOCOL_NOT_SUPPORTED;
-        default:
-            return NET_ERROR;
-        }
-    }
-
     struct sockaddr_in addr;
     _net_endpoint_to_addr(endpoint, &addr);
+    Net_SocketData* data               = _net_socket_data_ensure(sock);
+    u64             connect_timeout_ms = data->options.connect_timeout_ms;
+    TimePoint       start_time         = time_now();
 
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    while (true) {
+        int fd = _net_create_socket(endpoint);
+        if (fd < 0) {
+            _net_log_error();
+            switch (errno) {
+            case EMFILE:
+            case ENFILE:
+                return NET_OUT_OF_FD;
+            case ENETDOWN:
+                return NET_NO_NETWORK;
+            case EPROTONOSUPPORT:
+                return NET_PROTOCOL_NOT_SUPPORTED;
+            default:
+                return NET_ERROR;
+            }
+        }
+
+        if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+            sock->fd    = fd;
+            sock->proto = NET_PROTO_TCP;
+            sock->state = NET_STATE_CONNECTED;
+            _net_socket_set_ops(sock,
+                                &_net_tcp_transport_ops,
+                                _net_socket_data_ensure(sock)->pattern_ops);
+            return NET_OK;
+        }
+
+        int connect_error = errno;
         close(fd);
         _net_log_error();
-        switch (errno) {
+
+        switch (connect_error) {
         case ENETDOWN:
             return NET_NO_NETWORK;
         case EACCES:
             return NET_ACCESS_DENIED;
         default:
+            break;
+        }
+
+        if (!_net_tcp_should_retry_connect(connect_error)) {
             return NET_ERROR;
         }
-    }
 
-    sock->fd    = fd;
-    sock->proto = NET_PROTO_TCP;
-    sock->state = NET_STATE_CONNECTED;
-    _net_socket_set_ops(sock,
-                        &_net_tcp_transport_ops,
-                        _net_socket_data_ensure(sock)->pattern_ops);
-    return NET_OK;
+        if (connect_timeout_ms == NET_WAIT_IMMEDIATE) {
+            return NET_TIMEOUT;
+        }
+
+        if (connect_timeout_ms != NET_WAIT_INFINITE) {
+            TimeDuration elapsed = time_elapsed(start_time, time_now());
+            if (time_duration_to_ms(elapsed) >= connect_timeout_ms) {
+                return NET_TIMEOUT;
+            }
+        }
+
+        u64 retry_interval_ms = _net_tcp_connect_retry_interval_ms(sock);
+        if (connect_timeout_ms != NET_WAIT_INFINITE) {
+            TimeDuration elapsed = time_elapsed(start_time, time_now());
+            u64          remaining_ms =
+                connect_timeout_ms -
+                MIN(connect_timeout_ms, time_duration_to_ms(elapsed));
+            retry_interval_ms = MIN(retry_interval_ms, remaining_ms);
+        }
+
+        time_sleep_ms((u32)retry_interval_ms);
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -507,11 +579,8 @@ Net_Result _net_tcp_recv_message(Net_Socket* sock)
         result = _net_tcp_recv_message_from_fd(sock, pipe->tcp.fd, pipe);
         if (result == NET_CLOSED) {
             // A closed client should not tear down the whole listener. Mark the
-            // pipe closed and keep waiting when other clients are still alive.
+            // pipe closed and keep waiting for another client message.
             _net_pipe_close(pipe);
-            if (_net_tcp_open_pipe_count(sock) == 0) {
-                return NET_CLOSED;
-            }
             continue;
         }
 

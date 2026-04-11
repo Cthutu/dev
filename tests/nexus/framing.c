@@ -9,17 +9,10 @@
 typedef struct {
     char       url[64];
     string     first_message;
-    string     second_message;
     Net_Result bind_result;
     Net_Result recv_result;
-    Net_Result second_recv_result;
-    Net_Result drop_result;
     usize      recv_len;
-    usize      second_recv_len;
-    usize      required_len;
-    usize      dropped_len;
     u8         recv_buffer[256];
-    u8         second_recv_buffer[256];
 } FramingServerArgs;
 
 internal void _nexus_wait_for_server_start(void) { thread_sleep_ms(50); }
@@ -35,6 +28,13 @@ internal void _nexus_make_test_url(char* out_url, usize out_url_size)
              (unsigned)(next_port + (u16)(getpid() % 1000) * 10));
 }
 
+//------------------------------------------------------------------------------
+// _nexus_server_recv_once
+//
+// Receives a single Nexus message and copies its body into the test-owned
+// buffer for later assertions.
+//------------------------------------------------------------------------------
+
 internal void* _nexus_server_recv_once(void* arg)
 {
     FramingServerArgs* args = arg;
@@ -45,32 +45,17 @@ internal void* _nexus_server_recv_once(void* arg)
         return NULL;
     }
 
-    args->recv_result = net_recv(
-        &sock, args->recv_buffer, sizeof(args->recv_buffer), &args->recv_len);
-
-    net_close(&sock);
-    return NULL;
-}
-
-internal void* _nexus_server_drop_and_retry(void* arg)
-{
-    FramingServerArgs* args = arg;
-
-    Net_Socket sock         = net_socket();
-    args->bind_result       = net_bind(&sock, args->url);
-    if (NET_FAILED(args->bind_result)) {
-        return NULL;
+    Net_Message msg   = net_message_create(&sock);
+    args->recv_result = net_recv(&msg);
+    if (args->recv_result == NET_OK) {
+        args->recv_len = msg.length;
+        if (msg.length > 0) {
+            TEST_ASSERT_LE(msg.length, sizeof(args->recv_buffer));
+            memcpy(args->recv_buffer, msg.data, msg.length);
+        }
     }
 
-    u8 small_buffer[4];
-    args->recv_result = net_recv(
-        &sock, small_buffer, sizeof(small_buffer), &args->required_len);
-    args->drop_result        = net_recv(&sock, NULL, 0, &args->dropped_len);
-    args->second_recv_result = net_recv(&sock,
-                                        args->second_recv_buffer,
-                                        sizeof(args->second_recv_buffer),
-                                        &args->second_recv_len);
-
+    net_message_done(&msg);
     net_close(&sock);
     return NULL;
 }
@@ -89,11 +74,13 @@ TEST_CASE(nexus, tcp_message_framing_round_trip)
 
     Net_Socket client = net_socket();
     TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
-    TEST_ASSERT_EQ(
-        net_send(&client, args.first_message.data, args.first_message.count),
-        NET_OK);
-    net_close(&client);
 
+    Net_Message msg = net_message_create(&client);
+    net_message_append(&msg, args.first_message.data, args.first_message.count);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    net_message_done(&msg);
+    net_close(&client);
     thread_join(&server_thread);
 
     TEST_ASSERT_EQ(args.bind_result, NET_OK);
@@ -117,11 +104,13 @@ TEST_CASE(nexus, default_socket_constructor_works_for_message_sockets)
 
     Net_Socket client = net_socket();
     TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
-    TEST_ASSERT_EQ(
-        net_send(&client, args.first_message.data, args.first_message.count),
-        NET_OK);
-    net_close(&client);
 
+    Net_Message msg = net_message_create(&client);
+    net_message_append(&msg, args.first_message.data, args.first_message.count);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    net_message_done(&msg);
+    net_close(&client);
     thread_join(&server_thread);
 
     TEST_ASSERT_EQ(args.bind_result, NET_OK);
@@ -129,44 +118,6 @@ TEST_CASE(nexus, default_socket_constructor_works_for_message_sockets)
     TEST_ASSERT_EQ(args.recv_len, args.first_message.count);
     TEST_ASSERT_MEM_EQ(
         args.recv_buffer, args.first_message.data, args.first_message.count);
-}
-
-TEST_CASE(nexus, recv_buffer_too_small_can_drop_pending_message)
-{
-    FramingServerArgs args = {
-        .first_message  = S("message-one"),
-        .second_message = S("two"),
-    };
-    _nexus_make_test_url(args.url, sizeof(args.url));
-
-    Thread server_thread;
-    TEST_ASSERT(
-        thread_create(&server_thread, _nexus_server_drop_and_retry, &args));
-
-    _nexus_wait_for_server_start();
-
-    Net_Socket client = net_socket();
-    TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
-    TEST_ASSERT_EQ(
-        net_send(&client, args.first_message.data, args.first_message.count),
-        NET_OK);
-    TEST_ASSERT_EQ(
-        net_send(&client, args.second_message.data, args.second_message.count),
-        NET_OK);
-    net_close(&client);
-
-    thread_join(&server_thread);
-
-    TEST_ASSERT_EQ(args.bind_result, NET_OK);
-    TEST_ASSERT_EQ(args.recv_result, NET_BUFFER_TOO_SMALL);
-    TEST_ASSERT_EQ(args.required_len, args.first_message.count);
-    TEST_ASSERT_EQ(args.drop_result, NET_OK);
-    TEST_ASSERT_EQ(args.dropped_len, args.first_message.count);
-    TEST_ASSERT_EQ(args.second_recv_result, NET_OK);
-    TEST_ASSERT_EQ(args.second_recv_len, args.second_message.count);
-    TEST_ASSERT_MEM_EQ(args.second_recv_buffer,
-                       args.second_message.data,
-                       args.second_message.count);
 }
 
 TEST_CASE(nexus, zero_length_messages_are_valid)
@@ -181,9 +132,12 @@ TEST_CASE(nexus, zero_length_messages_are_valid)
 
     Net_Socket client = net_socket();
     TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
-    TEST_ASSERT_EQ(net_send(&client, NULL, 0), NET_OK);
-    net_close(&client);
 
+    Net_Message msg = net_message_create(&client);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    net_message_done(&msg);
+    net_close(&client);
     thread_join(&server_thread);
 
     TEST_ASSERT_EQ(args.bind_result, NET_OK);
@@ -193,7 +147,9 @@ TEST_CASE(nexus, zero_length_messages_are_valid)
 
 TEST_CASE(nexus, send_rejects_messages_larger_than_maximum)
 {
-    FramingServerArgs args = {};
+    FramingServerArgs args = {
+        .first_message = S("ok"),
+    };
     _nexus_make_test_url(args.url, sizeof(args.url));
 
     Thread server_thread;
@@ -204,16 +160,24 @@ TEST_CASE(nexus, send_rejects_messages_larger_than_maximum)
     Net_Socket client = net_socket();
     TEST_ASSERT_EQ(net_connect(&client, args.url), NET_OK);
 
-    u8* large_buffer =
-        mem_realloc(NULL, NET_MAX_MESSAGE_SIZE + 1, __FILE__, __LINE__);
-    TEST_ASSERT_EQ(net_send(&client, large_buffer, NET_MAX_MESSAGE_SIZE + 1),
-                   NET_BAD_MESSAGE);
+    Net_Message msg = net_message_create(&client);
+    msg.data = mem_realloc(NULL, NET_MAX_MESSAGE_SIZE + 1, __FILE__, __LINE__);
+    msg.length   = NET_MAX_MESSAGE_SIZE + 1;
+    msg.capacity = NET_MAX_MESSAGE_SIZE + 1;
 
+    TEST_ASSERT_EQ(net_send(&msg), NET_BAD_MESSAGE);
+
+    net_message_clear(&msg);
+    net_message_append(&msg, args.first_message.data, args.first_message.count);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+
+    net_message_done(&msg);
     net_close(&client);
     thread_join(&server_thread);
 
     TEST_ASSERT_EQ(args.bind_result, NET_OK);
-    TEST_ASSERT_EQ(args.recv_result, NET_CLOSED);
-
-    mem_free(large_buffer, __FILE__, __LINE__);
+    TEST_ASSERT_EQ(args.recv_result, NET_OK);
+    TEST_ASSERT_EQ(args.recv_len, args.first_message.count);
+    TEST_ASSERT_MEM_EQ(
+        args.recv_buffer, args.first_message.data, args.first_message.count);
 }
