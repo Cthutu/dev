@@ -213,13 +213,18 @@ void _net_endpoint_to_addr(Net_Endpoint* endpoint, struct sockaddr_in* out_addr)
 
 void _net_socket_clear_pending(Net_Socket* sock)
 {
-    if (sock->pending_message) {
-        sock->pending_message =
-            mem_free(sock->pending_message, __FILE__, __LINE__);
+    Net_SocketData* data = _net_socket_data(sock);
+    if (!data) {
+        return;
     }
-    sock->pending_message_len      = 0;
-    sock->pending_message_capacity = 0;
-    sock->has_pending_message      = false;
+
+    if (data->pending_message) {
+        data->pending_message =
+            mem_free(data->pending_message, __FILE__, __LINE__);
+    }
+    data->pending_message_len      = 0;
+    data->pending_message_capacity = 0;
+    data->has_pending_message      = false;
 }
 
 //------------------------------------------------------------------------------
@@ -231,20 +236,22 @@ void _net_socket_clear_pending(Net_Socket* sock)
 
 void _net_socket_store_pending(Net_Socket* sock, const void* buffer, usize len)
 {
-    if (len > sock->pending_message_capacity) {
+    Net_SocketData* data = _net_socket_data_ensure(sock);
+
+    if (len > data->pending_message_capacity) {
         // Grow the retained buffer only when needed so repeated receives can
         // reuse the same allocation.
-        sock->pending_message =
-            mem_realloc(sock->pending_message, len, __FILE__, __LINE__);
-        sock->pending_message_capacity = len;
+        data->pending_message =
+            mem_realloc(data->pending_message, len, __FILE__, __LINE__);
+        data->pending_message_capacity = len;
     }
 
     if (len > 0) {
-        memcpy(sock->pending_message, buffer, len);
+        memcpy(data->pending_message, buffer, len);
     }
 
-    sock->pending_message_len = len;
-    sock->has_pending_message = true;
+    data->pending_message_len = len;
+    data->has_pending_message = true;
 }
 
 //------------------------------------------------------------------------------
@@ -260,33 +267,34 @@ Net_Result _net_socket_consume_pending(Net_Socket* sock,
                                        usize       len,
                                        usize*      out_recv_len)
 {
-    if (!sock->has_pending_message) {
+    Net_SocketData* data = _net_socket_data(sock);
+    if (!data || !data->has_pending_message) {
         return NET_NOT_CONNECTED;
     }
 
     if (out_recv_len) {
         // Always report the full pending size so the caller can size a retry
         // buffer correctly.
-        *out_recv_len = sock->pending_message_len;
+        *out_recv_len = data->pending_message_len;
     }
 
     if (!buffer) {
         // A null buffer is the explicit "drop this pending message" signal.
-        sock->has_pending_message = false;
-        sock->pending_message_len = 0;
+        data->has_pending_message = false;
+        data->pending_message_len = 0;
         return NET_OK;
     }
 
-    if (len < sock->pending_message_len) {
+    if (len < data->pending_message_len) {
         return NET_BUFFER_TOO_SMALL;
     }
 
-    if (sock->pending_message_len > 0) {
-        memcpy(buffer, sock->pending_message, sock->pending_message_len);
+    if (data->pending_message_len > 0) {
+        memcpy(buffer, data->pending_message, data->pending_message_len);
     }
 
-    sock->has_pending_message = false;
-    sock->pending_message_len = 0;
+    data->has_pending_message = false;
+    data->pending_message_len = 0;
     return NET_OK;
 }
 
