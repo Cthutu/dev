@@ -25,7 +25,11 @@ int run(int argc, char* argv[])
     prn("Connected to %s", url);
     prn("Sending message: " STRINGP, STRINGV(message));
 
-    result = net_send(&sock, message.data, message.count);
+    Net_Message msg = net_message_create(&sock);
+    net_message_append_string(&msg, message);
+
+    result = net_send_msg(&msg);
+    net_message_done(&msg);
     if (NET_FAILED(result)) {
         kill("Failed to send data: %s", net_result_string(result));
     }
