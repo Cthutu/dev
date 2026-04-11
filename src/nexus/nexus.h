@@ -66,6 +66,13 @@ typedef struct {
     Net_State    state;
     int          fd; // Socket file descriptor
     Net_Protocol proto;
+
+    // Private implementation state. Callers should treat these fields as
+    // unstable and avoid depending on them directly.
+    void* pending_message;
+    usize pending_message_len;
+    usize pending_message_capacity;
+    bool  has_pending_message;
 } Net_Socket;
 
 typedef struct {
@@ -78,14 +85,43 @@ typedef struct {
 //------------------------------------------------------------------------------
 // Socket API
 
+// Create a socket handle in the disconnected state. The handle itself does not
+// allocate network resources until `net_bind` or `net_connect` succeeds.
 Net_Socket net_socket(void);
-void       net_close(Net_Socket* sock);
-cstr       net_result_string(Net_Result result);
 
+// Close the socket and free any private message-framing state.
+void net_close(Net_Socket* sock);
+
+// Convert a `Net_Result` into a short readable string suitable for logging.
+cstr net_result_string(Net_Result result);
+
+// Bind a socket to the provided URL. For TCP, the socket becomes a simple
+// single-peer server endpoint and will accept an incoming connection during the
+// first `net_recv`. For UDP, the socket can receive immediately after bind.
 Net_Result net_bind(Net_Socket* sock, cstr url);
+
+// Connect a socket to the provided URL. For TCP this establishes a connection.
+// For UDP it sets the default peer for future send/recv calls.
 Net_Result net_connect(Net_Socket* sock, cstr url);
 
+// Send one message over the socket. For TCP the message is framed internally
+// with a 4-byte length prefix. For UDP the message is sent as one datagram.
+// Messages larger than `NET_MAX_MESSAGE_SIZE` fail with `NET_BAD_MESSAGE`.
 Net_Result net_send(Net_Socket* sock, const void* buffer, usize len);
+
+// Receive one message from the socket.
+//
+// For TCP, Nexus reads a full framed message and only returns once one complete
+// message is available. For UDP, one datagram is received.
+//
+// If the caller buffer is too small, this returns `NET_BUFFER_TOO_SMALL`,
+// leaves the message pending inside the socket, and writes the required payload
+// size to `out_recv_len` when provided.
+//
+// If `buffer == NULL`, the pending message is dropped instead of copied out. If
+// `out_recv_len` is provided, it receives the dropped message size.
+//
+// Zero-length messages are valid.
 Net_Result
 net_recv(Net_Socket* sock, void* buffer, usize len, usize* out_recv_len);
 
