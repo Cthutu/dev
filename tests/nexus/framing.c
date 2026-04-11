@@ -4,9 +4,10 @@
 #include <nexus/nexus.h>
 #include <test.h>
 #include <thread/thread.h>
+#include <unistd.h>
 
 typedef struct {
-    cstr       url;
+    char       url[64];
     string     first_message;
     string     second_message;
     Net_Result bind_result;
@@ -22,6 +23,17 @@ typedef struct {
 } FramingServerArgs;
 
 internal void _nexus_wait_for_server_start(void) { thread_sleep_ms(50); }
+
+internal void _nexus_make_test_url(char* out_url, usize out_url_size)
+{
+    static u16 next_port = 18080;
+
+    next_port++;
+    snprintf(out_url,
+             out_url_size,
+             "tcp://127.0.0.1:%u",
+             (unsigned)(next_port + (u16)(getpid() % 1000) * 10));
+}
 
 internal void* _nexus_server_recv_once(void* arg)
 {
@@ -66,9 +78,9 @@ internal void* _nexus_server_drop_and_retry(void* arg)
 TEST_CASE(nexus, tcp_message_framing_round_trip)
 {
     FramingServerArgs args = {
-        .url           = "tcp://127.0.0.1:18081",
         .first_message = S("Hello from a framed TCP client"),
     };
+    _nexus_make_test_url(args.url, sizeof(args.url));
 
     Thread server_thread;
     TEST_ASSERT(thread_create(&server_thread, _nexus_server_recv_once, &args));
@@ -94,9 +106,9 @@ TEST_CASE(nexus, tcp_message_framing_round_trip)
 TEST_CASE(nexus, default_socket_constructor_works_for_message_sockets)
 {
     FramingServerArgs args = {
-        .url           = "tcp://127.0.0.1:18084",
         .first_message = S("Hello from net_socket"),
     };
+    _nexus_make_test_url(args.url, sizeof(args.url));
 
     Thread server_thread;
     TEST_ASSERT(thread_create(&server_thread, _nexus_server_recv_once, &args));
@@ -122,10 +134,10 @@ TEST_CASE(nexus, default_socket_constructor_works_for_message_sockets)
 TEST_CASE(nexus, recv_buffer_too_small_can_drop_pending_message)
 {
     FramingServerArgs args = {
-        .url            = "tcp://127.0.0.1:18082",
         .first_message  = S("message-one"),
         .second_message = S("two"),
     };
+    _nexus_make_test_url(args.url, sizeof(args.url));
 
     Thread server_thread;
     TEST_ASSERT(
@@ -159,9 +171,8 @@ TEST_CASE(nexus, recv_buffer_too_small_can_drop_pending_message)
 
 TEST_CASE(nexus, zero_length_messages_are_valid)
 {
-    FramingServerArgs args = {
-        .url = "tcp://127.0.0.1:18083",
-    };
+    FramingServerArgs args = {};
+    _nexus_make_test_url(args.url, sizeof(args.url));
 
     Thread server_thread;
     TEST_ASSERT(thread_create(&server_thread, _nexus_server_recv_once, &args));
@@ -182,9 +193,8 @@ TEST_CASE(nexus, zero_length_messages_are_valid)
 
 TEST_CASE(nexus, send_rejects_messages_larger_than_maximum)
 {
-    FramingServerArgs args = {
-        .url = "tcp://127.0.0.1:18085",
-    };
+    FramingServerArgs args = {};
+    _nexus_make_test_url(args.url, sizeof(args.url));
 
     Thread server_thread;
     TEST_ASSERT(thread_create(&server_thread, _nexus_server_recv_once, &args));
