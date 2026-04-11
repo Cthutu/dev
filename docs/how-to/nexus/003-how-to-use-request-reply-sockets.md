@@ -8,6 +8,26 @@ basic message transport.
 Use `net_request_socket()` and `net_reply_socket()` to enforce a strict
 request/reply exchange.
 
+## When should you use request/reply?
+
+Choose request/reply sockets when:
+
+- one side is clearly issuing requests
+- the other side is clearly sending one reply per request
+- you want Nexus to enforce the turn-taking rules for you
+
+Choose a basic socket instead when:
+
+- either side may send unsolicited messages
+- you need a more conversational or symmetric protocol
+- you want to define your own ordering rules in the application
+
+The difference is behavioural, not transport-level. Both socket kinds still use
+the same underlying Nexus message transport:
+
+- TCP with internal framing
+- UDP with datagram semantics
+
 ## Request/reply rules
 
 Request sockets must do this:
@@ -23,6 +43,9 @@ Reply sockets must do this:
 3. repeat
 
 If you break that order, Nexus returns `NET_WRONG_STATE`.
+
+That is the main reason to choose request/reply over a basic socket: the socket
+kind itself protects the intended protocol flow.
 
 ## Client example
 

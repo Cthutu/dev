@@ -96,6 +96,31 @@ Reply sockets enforce the opposite sequence:
 Trying to send before receiving, or receiving two requests in a row without
 replying, returns `NET_WRONG_STATE`.
 
+### Which one should you use?
+
+Use a basic socket when:
+
+- your protocol is symmetric
+- either side may send unsolicited messages
+- you want to define your own message ordering rules
+- you may need several sends before a receive, or several receives before a
+  send
+
+Use request/reply sockets when:
+
+- one side is clearly making requests and the other is clearly answering them
+- you want at most one outstanding request per socket
+- you want Nexus to catch ordering mistakes early with `NET_WRONG_STATE`
+- the protocol reads naturally as:
+  - request side: send, then receive
+  - reply side: receive, then send
+
+In short:
+
+- basic socket: flexible message transport
+- request socket: client-side turn-taking
+- reply socket: server-side turn-taking
+
 ## URLs
 
 Nexus currently accepts URLs of the form:
