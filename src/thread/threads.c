@@ -14,15 +14,15 @@
 //------------------------------------------------------------------------------
 // Windows implementation
 
-#if CS_OS_WINDOWS
+#if OS_WINDOWS
 
-bool thread_create(CS_Thread* thread, void (*func)(void*), void* arg)
+bool thread_create(Thread* thread, void (*func)(void*), void* arg)
 {
     *thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)func, arg, 0, NULL);
     return *thread != NULL;
 }
 
-void thread_join(CS_Thread* thread)
+void thread_join(Thread* thread)
 {
     WaitForSingleObject(*thread, INFINITE);
     CloseHandle(*thread);
