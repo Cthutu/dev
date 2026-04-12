@@ -48,6 +48,13 @@ class UndefinedSymbolReference:
     referenced_from: str
 
 
+@dataclass
+class UndefinedSymbolSummary:
+    symbol: str
+    referenced_from: list[str]
+    source_locations: list[str]
+
+
 def colour(text: str, prefix: str) -> str:
     return f"{prefix}{text}{RESET}"
 
@@ -96,7 +103,7 @@ def parse_undefined_symbol_references(
         r"^/usr/bin/ld:\s+(?P<object>[^:]+): in function `(?P<context>[^']+)':$"
     )
     undefined_ref_re = re.compile(
-        r"^(?:/usr/bin/ld:\s+)?(?P<display>[^:]+):\((?P<section>[^+]+)\+(?P<offset>0x[0-9a-fA-F]+)\): "
+        r"^(?:/usr/bin/ld:\s+)?(?P<display>.+):\((?P<section>[^+]+)\+(?P<offset>0x[0-9a-fA-F]+)\): "
         r"undefined reference to `(?P<symbol>[^']+)'$"
     )
 
@@ -154,6 +161,7 @@ def resolve_reference_location(
 
 
 def print_undefined_symbol_table(references: list[UndefinedSymbolReference]) -> None:
+    summaries = collate_undefined_symbol_references(references)
     table = Table(
         title="Undefined Symbols",
         box=box.ROUNDED,
@@ -161,14 +169,34 @@ def print_undefined_symbol_table(references: list[UndefinedSymbolReference]) -> 
     )
     table.add_column("Symbol", style="bold")
     table.add_column("Referenced From")
-    table.add_column("Location")
-    for reference in references:
+    table.add_column("Locations")
+    for summary in summaries:
         table.add_row(
-            reference.symbol,
-            reference.referenced_from,
-            reference.source_location,
+            summary.symbol,
+            "\n".join(summary.referenced_from),
+            "\n".join(summary.source_locations),
         )
     RICH_CONSOLE.print(table)
+
+
+def collate_undefined_symbol_references(
+    references: list[UndefinedSymbolReference],
+) -> list[UndefinedSymbolSummary]:
+    grouped: dict[str, UndefinedSymbolSummary] = {}
+    for reference in references:
+        summary = grouped.get(reference.symbol)
+        if summary is None:
+            summary = UndefinedSymbolSummary(
+                symbol=reference.symbol,
+                referenced_from=[],
+                source_locations=[],
+            )
+            grouped[reference.symbol] = summary
+        if reference.referenced_from not in summary.referenced_from:
+            summary.referenced_from.append(reference.referenced_from)
+        if reference.source_location not in summary.source_locations:
+            summary.source_locations.append(reference.source_location)
+    return list(grouped.values())
 
 
 def select_cflags(profile: str) -> list[str]:
