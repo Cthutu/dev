@@ -5,25 +5,25 @@ python-env:
     @uv -q --no-progress --directory build sync
 
 build *args: python-env
-    build/.venv/bin/python build/build.py {{args}}
+    uv --directory build run python ../build/build.py {{args}}
 
 build-release *args: python-env
-    build/.venv/bin/python build/build.py -r {{args}}
+    uv --directory build run python ../build/build.py -r {{args}}
 
 test *args: python-env
-    build/.venv/bin/python build/test.py {{args}}
+    uv --directory build run python ../build/test.py {{args}}
 
 test-release *args: python-env
-    build/.venv/bin/python build/test.py -r {{args}}
+    uv --directory build run python ../build/test.py -r {{args}}
 
 format: python-env
-    build/.venv/bin/python build/format.py
+    uv --directory build run python ../build/format.py
 
-run proj *args: (build proj)
-    _bin/{{proj}}-debug {{args}}
+run *args: python-env
+    uv --directory build run python ../build/run.py {{args}}
 
-run-release proj *args: (build-release proj)
-    _bin/{{proj}} {{args}}
+run-release *args: python-env
+    uv --directory build run python ../build/run.py -r {{args}}
 
 clean:
     rm -rf _bin _obj

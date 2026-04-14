@@ -3,6 +3,7 @@
 //
 // Server demo
 //
+//> desc: Server part of the Nexus demo
 //> use: core nexus
 
 #include <nexus/nexus.h>

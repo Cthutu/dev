@@ -210,6 +210,10 @@ def available_top_level_c_files(source_dir: Path) -> list[str]:
     return sorted(path.stem for path in source_dir.glob("*.c"))
 
 
+def available_top_level_c_paths(source_dir: Path) -> list[Path]:
+    return sorted(source_dir.glob("*.c"))
+
+
 def banner(profile: str, items: list[str], noun: str, cc: str) -> None:
     bar = "=" * 48
     print(colour(bar, CYAN))
@@ -434,6 +438,14 @@ def _parse_command_lines(
                         )
                     )
                 _add_unique(libs, token)
+        elif command == "desc":
+            if not params.strip():
+                raise SystemExit(
+                    colour(
+                        f"Invalid desc directive in {source}:{line_no}: description is empty",
+                        RED,
+                    )
+                )
         else:
             border_top = colour("┌──────┬───────────────────────┐", CYAN)
             border_mid = colour("├──────┼───────────────────────┤", CYAN)
@@ -466,6 +478,13 @@ def _parse_command_lines(
                 + colour("linker libraries", CYAN)
                 + colour("      │", CYAN)
             )
+            row_desc = (
+                colour("│ ", CYAN)
+                + colour("desc", GREEN)
+                + colour(" │ ", CYAN)
+                + colour("project listing text", CYAN)
+                + colour("     │", CYAN)
+            )
             table_lines = [
                 colour("Known commands:", YELLOW),
                 border_top,
@@ -474,6 +493,7 @@ def _parse_command_lines(
                 row_use,
                 row_def,
                 row_lib,
+                row_desc,
                 border_bot,
             ]
             raise SystemExit(
@@ -494,6 +514,24 @@ def parse_sections_and_defines(
         require_prefix=True,
         section_root=section_root,
     )
+
+
+def parse_description(src: Path) -> str | None:
+    text = src.read_text(encoding="utf-8", errors="ignore")
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        match = re.match(r"\s*//>\s*(\w+)\s*:\s*(.*)$", line)
+        if not match:
+            continue
+        command, params = match.groups()
+        if command.lower() != "desc":
+            continue
+        description = params.strip()
+        if not description:
+            raise SystemExit(
+                colour(f"Invalid desc directive in {src}:{line_no}: description is empty", RED)
+            )
+        return description
+    return None
 
 
 def module_header_for_dir(directory: Path, section_root: Path) -> Path | None:

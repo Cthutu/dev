@@ -1,3 +1,4 @@
+//> desc: Window test program
 //> use: gfx
 
 #include <gfx/gfx.h>

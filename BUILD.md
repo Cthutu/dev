@@ -18,6 +18,8 @@ In normal use, you do not call the Python scripts directly. Use `just`.
   Builds all top-level projects found in `src/`.
 - `just build-release <project>`
   Builds one or more projects in release mode.
+- `just run`
+  Lists all top-level projects in `src/`, showing `//> desc: ...` text when present.
 - `just run <project>`
   Builds the project in debug mode if needed, then runs `_bin/<project>-debug`.
 - `just run-release <project>`
@@ -85,6 +87,8 @@ Common forms:
   Declares module/section dependencies.
 - `//> def: NAME=value`
   Adds preprocessor definitions for that source/module.
+- `//> desc: Short project summary`
+  Provides the description shown by `just run` when listing projects.
 
 These are parsed by the build tooling and folded into compile and link steps.
 

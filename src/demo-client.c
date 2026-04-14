@@ -3,6 +3,7 @@
 //
 // Client demo that sends a message to the server demo
 //
+//> desc: Client part of the Nexus demo
 //> use: core nexus
 
 #include <nexus/nexus.h>
