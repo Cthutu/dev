@@ -25,6 +25,9 @@ internal const Net_ProtocolOps _net_reqrep_protocol_ops = {
     .recv = _net_reqrep_recv,
 };
 
+#define NET_DEFAULT_CONNECT_TIMEOUT_MS 1000ull
+#define NET_DEFAULT_RECONNECT_INTERVAL_MS 25ull
+
 //------------------------------------------------------------------------------
 // _net_socket_data
 //
@@ -64,8 +67,8 @@ internal Net_SocketData* _net_socket_data_alloc(Net_Socket* sock)
 
     data->kind                          = sock->kind;
     data->max_message_size              = NET_MAX_MESSAGE_SIZE;
-    data->options.connect_timeout_ms    = NET_WAIT_IMMEDIATE;
-    data->options.reconnect_interval_ms = NET_WAIT_IMMEDIATE;
+    data->options.connect_timeout_ms    = NET_DEFAULT_CONNECT_TIMEOUT_MS;
+    data->options.reconnect_interval_ms = NET_DEFAULT_RECONNECT_INTERVAL_MS;
     data->options.send_timeout_ms       = NET_WAIT_INFINITE;
     data->options.recv_timeout_ms       = NET_WAIT_INFINITE;
     data->options.nonblocking           = 0;
