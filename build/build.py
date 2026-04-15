@@ -40,7 +40,7 @@ SCRIPT_PATH = Path(__file__).resolve()
 COMMON_PATH = SCRIPT_PATH.parent / "common.py"
 
 CC = os.environ.get("CC", "clang")
-INCLUDE_FLAGS = ["-Isrc"]
+INCLUDE_FLAGS = [f"-I{SRC_DIR}"]
 LDFLAGS: list[str] = []
 
 

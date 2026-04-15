@@ -1,3 +1,4 @@
 -std=c23
 -Isrc
+-Ibuild
 

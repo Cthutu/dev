@@ -455,7 +455,7 @@ def main(argv: list[str] | None = None) -> None:
         profile = "release" if args.release else "debug"
         cflags = select_cflags(profile)
         obj_dir = OBJ_DIR_BASE / profile
-        include_flags = ["-Isrc", "-Ibuild"]
+        include_flags = [f"-I{SRC_DIR}", f"-I{BUILD_DIR}"]
 
         available_targets = {target.name: target for target in discover_test_targets()}
         tests = select_tests(args.test_modules)
