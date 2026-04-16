@@ -106,16 +106,16 @@ _net_poll_fd(int fd, short events, TimePoint deadline, bool nonblocking)
             }
         }
 
-        if (poll_fd.revents & (POLLERR | POLLNVAL)) {
-            return NET_ERROR;
+        if (poll_fd.revents & events) {
+            return NET_OK;
         }
 
         if (poll_fd.revents & POLLHUP) {
             return NET_CLOSED;
         }
 
-        if (poll_fd.revents & events) {
-            return NET_OK;
+        if (poll_fd.revents & (POLLERR | POLLNVAL)) {
+            return NET_ERROR;
         }
     }
 }

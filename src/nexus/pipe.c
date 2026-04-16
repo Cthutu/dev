@@ -6,7 +6,40 @@
 
 #include <nexus/internal.h>
 
+#include <poll.h>
+#include <sys/socket.h>
 #include <unistd.h>
+
+void _net_tcp_close_telnet_fd(int fd)
+{
+    if (fd < 0) {
+        return;
+    }
+
+    shutdown(fd, SHUT_WR);
+
+    u8            buffer[256];
+    struct pollfd poll_fd = {
+        .fd     = fd,
+        .events = POLLIN,
+    };
+
+    while (poll(&poll_fd, 1, 50) > 0) {
+        if (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            break;
+        }
+        if (!(poll_fd.revents & POLLIN)) {
+            break;
+        }
+
+        ssize_t recv_len = recv(fd, buffer, sizeof(buffer), 0);
+        if (recv_len <= 0) {
+            break;
+        }
+    }
+
+    close(fd);
+}
 
 //------------------------------------------------------------------------------
 // _net_pipe_alloc
@@ -90,7 +123,11 @@ void _net_pipe_close(Net_Pipe* pipe)
     }
 
     if (pipe->kind == NET_PIPE_TCP && pipe->tcp.fd >= 0) {
-        close(pipe->tcp.fd);
+        if (pipe->owner->kind == NET_SOCKET_TELNET) {
+            _net_tcp_close_telnet_fd(pipe->tcp.fd);
+        } else {
+            close(pipe->tcp.fd);
+        }
         pipe->tcp.fd = -1;
         _net_telnet_state_done(&pipe->tcp.telnet);
     }

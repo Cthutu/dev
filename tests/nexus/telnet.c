@@ -183,7 +183,7 @@ internal void* _nexus_telnet_character_server(void* arg)
     return NULL;
 }
 
-TEST_CASE(nexus, telnet_socket_round_trip_over_tcp)
+internal void _nexus_telnet_expect_round_trip_after_immediate_close(void)
 {
     TelnetServerArgs server_args = {
         .echo_reply = true,
@@ -206,7 +206,6 @@ TEST_CASE(nexus, telnet_socket_round_trip_over_tcp)
     Net_Message msg = net_message_create(&client);
     net_message_append(&msg, "hello from telnet", 17);
     TEST_ASSERT_EQ(net_send(&msg), NET_OK);
-
     TEST_ASSERT_EQ(net_recv(&msg), NET_OK);
 
     string reply = string_from(msg.data, msg.length);
@@ -223,6 +222,62 @@ TEST_CASE(nexus, telnet_socket_round_trip_over_tcp)
 
     net_message_done(&msg);
     net_close(&client);
+}
+
+internal void _nexus_telnet_expect_close_after_final_reply(void)
+{
+    TelnetServerArgs server_args = {
+        .echo_reply = true,
+    };
+    _nexus_make_telnet_test_url(server_args.url, sizeof(server_args.url));
+
+    Thread server_thread;
+    TEST_ASSERT(
+        thread_create(&server_thread, _nexus_telnet_echo_server, &server_args));
+
+    _nexus_telnet_wait_for_server_start();
+
+    Net_Socket client = net_telnet_socket();
+    TEST_ASSERT_EQ(net_set_option(&client, NET_OPT_CONNECT_TIMEOUT_MS, 1000),
+                   NET_OK);
+    TEST_ASSERT_EQ(net_set_option(&client, NET_OPT_RECONNECT_INTERVAL_MS, 25),
+                   NET_OK);
+    TEST_ASSERT_EQ(net_connect(&client, server_args.url), NET_OK);
+
+    Net_Message msg = net_message_create(&client);
+    net_message_append(&msg, "hello from telnet", 17);
+    TEST_ASSERT_EQ(net_send(&msg), NET_OK);
+    TEST_ASSERT_EQ(net_recv(&msg), NET_OK);
+
+    string reply = string_from(msg.data, msg.length);
+    TEST_ASSERT(string_equals_cstr(reply, "echo: hello from telnet"));
+
+    thread_join(&server_thread);
+
+    TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.recv_result, NET_OK);
+    TEST_ASSERT_EQ(server_args.send_result, NET_OK);
+    TEST_ASSERT_EQ(net_recv(&msg), NET_CLOSED);
+
+    net_message_done(&msg);
+    net_close(&client);
+}
+
+TEST_CASE(nexus, telnet_socket_round_trip_over_tcp)
+{
+    _nexus_telnet_expect_round_trip_after_immediate_close();
+}
+
+TEST_CASE(nexus, telnet_socket_round_trip_survives_immediate_close_repeatedly)
+{
+    for (usize i = 0; i < 20; ++i) {
+        _nexus_telnet_expect_round_trip_after_immediate_close();
+    }
+}
+
+TEST_CASE(nexus, telnet_socket_reports_closed_after_final_reply)
+{
+    _nexus_telnet_expect_close_after_final_reply();
 }
 
 TEST_CASE(nexus, telnet_socket_sends_crlf_terminated_lines)

@@ -225,6 +225,7 @@ Net_Result _net_tcp_send_all_fd(
     int fd, const u8* buffer, usize len, TimePoint deadline, bool nonblocking);
 Net_Result
 _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline);
+void _net_tcp_close_telnet_fd(int fd);
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------

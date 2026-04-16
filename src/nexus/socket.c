@@ -215,7 +215,11 @@ void net_close(Net_Socket* sock)
     _net_socket_close_pipes(sock);
 
     if (sock->fd >= 0) {
-        close(sock->fd);
+        if (sock->kind == NET_SOCKET_TELNET) {
+            _net_tcp_close_telnet_fd(sock->fd);
+        } else {
+            close(sock->fd);
+        }
         sock->fd = -1;
     }
 
