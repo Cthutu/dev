@@ -129,6 +129,38 @@ bool term_rect_clip(TermRect  a,
                     TermRect* out_clipped_rect,
                     TermRect* out_local_rect);
 
+//------------------------------------------------------------------------------
+// Terminal window
+//------------------------------------------------------------------------------
+
+typedef struct {
+    u32 ink;
+    u32 paper;
+    u32 ch;
+} TermCell;
+
+typedef struct {
+    TermRect rect;
+    Array(TermCell) cells;
+} TermWindow;
+
+void term_window_init(TermWindow* window, TermRect rect);
+void term_window_clear(TermWindow* window, u32 ch, u32 ink, u32 paper);
+void term_window_rect(TermWindow* window, TermRect rect, u32 ch);
+void term_window_paint(const TermWindow* window,
+                       TermRect          rect,
+                       u32               ink,
+                       u32               paper);
+void term_window_9slice(const TermWindow* window, TermRect rect, cstr slices);
+
+void term_window_write(TermWindow* window, int x, int y, string str);
+void term_window_write_cstr(TermWindow* window, int x, int y, cstr string);
+
+void term_window_formatv(
+    TermWindow* window, int x, int y, cstr fmt, va_list args);
+void term_window_format(TermWindow* window, int x, int y, cstr fmt, ...);
+
+void term_window_draw(const TermWindow* window);
 
 //------------------------------------------------------------------------------
 // Terminal information dumping
