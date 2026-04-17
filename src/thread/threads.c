@@ -16,9 +16,33 @@
 
 #if OS_WINDOWS
 
-bool thread_create(Thread* thread, void (*func)(void*), void* arg)
+typedef struct {
+    void* (*func)(void*);
+    void* arg;
+} ThreadStartData;
+
+internal DWORD WINAPI _thread_entry(LPVOID raw)
 {
-    *thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)func, arg, 0, NULL);
+    ThreadStartData* data = raw;
+    void* (*func)(void*)  = data->func;
+    void* arg             = data->arg;
+    mem_free(data, __FILE__, __LINE__);
+    (void)func(arg);
+    return 0;
+}
+
+bool thread_create(Thread* thread, void* (*func)(void*), void* arg)
+{
+    ThreadStartData* data = mem_realloc(NULL, sizeof(*data), __FILE__, __LINE__);
+    data->func            = func;
+    data->arg             = arg;
+
+    *thread = CreateThread(NULL, 0, _thread_entry, data, 0, NULL);
+    if (*thread == NULL) {
+        mem_free(data, __FILE__, __LINE__);
+        return false;
+    }
+
     return *thread != NULL;
 }
 

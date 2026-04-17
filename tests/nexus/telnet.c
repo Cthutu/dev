@@ -1,13 +1,10 @@
 //> use: core nexus thread
 
-#include <arpa/inet.h>
 #include <core/core.h>
-#include <netinet/in.h>
 #include <nexus/nexus.h>
-#include <sys/socket.h>
 #include <test.h>
 #include <thread/thread.h>
-#include <unistd.h>
+#include "test_net.h"
 
 typedef struct {
     char       url[64];
@@ -36,40 +33,15 @@ typedef struct {
     char       received_chars[3];
 } TelnetCharServerArgs;
 
-internal u16 _nexus_choose_telnet_test_port(int sock_type, int proto)
-{
-    int fd = socket(AF_INET, sock_type, proto);
-    ASSERT(fd >= 0, "Failed to create test socket");
-
-    int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-
-    struct sockaddr_in addr = {
-        .sin_family      = AF_INET,
-        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
-        .sin_port        = 0,
-    };
-
-    ASSERT(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0,
-           "Failed to bind test socket");
-
-    socklen_t addr_len = sizeof(addr);
-    ASSERT(getsockname(fd, (struct sockaddr*)&addr, &addr_len) == 0,
-           "Failed to query test socket port");
-
-    close(fd);
-    return ntohs(addr.sin_port);
-}
-
 internal void _nexus_make_telnet_test_url(char* out_url, usize out_url_size)
 {
-    u16 port = _nexus_choose_telnet_test_port(SOCK_STREAM, IPPROTO_TCP);
+    u16 port = _nexus_choose_test_port(SOCK_STREAM, IPPROTO_TCP);
     snprintf(out_url, out_url_size, "tcp://127.0.0.1:%u", (unsigned)port);
 }
 
 internal void _nexus_make_telnet_udp_test_url(char* out_url, usize out_url_size)
 {
-    u16 port = _nexus_choose_telnet_test_port(SOCK_DGRAM, IPPROTO_UDP);
+    u16 port = _nexus_choose_test_port(SOCK_DGRAM, IPPROTO_UDP);
     snprintf(out_url, out_url_size, "udp://127.0.0.1:%u", (unsigned)port);
 }
 
@@ -112,11 +84,14 @@ internal void* _nexus_raw_tcp_line_server(void* arg)
 {
     RawTcpServerArgs* args = arg;
 
-    int server_fd          = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    ASSERT(server_fd >= 0, "Failed to create raw TCP server socket");
+    _nexus_test_net_init();
 
-    int one = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    nexus_test_fd_t server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ASSERT(server_fd != NEXUS_TEST_INVALID_FD,
+           "Failed to create raw TCP server socket");
+
+    ASSERT(_nexus_test_setsockopt_reuseaddr(server_fd) == 0,
+           "Failed to set SO_REUSEADDR on raw TCP server");
 
     struct sockaddr_in addr = {
         .sin_family      = AF_INET,
@@ -129,14 +104,16 @@ internal void* _nexus_raw_tcp_line_server(void* arg)
     ASSERT(listen(server_fd, 1) == 0, "Failed to listen on raw TCP server");
     args->ready   = true;
 
-    int client_fd = accept(server_fd, NULL, NULL);
-    ASSERT(client_fd >= 0, "Failed to accept raw TCP client");
+    nexus_test_fd_t client_fd = accept(server_fd, NULL, NULL);
+    ASSERT(client_fd != NEXUS_TEST_INVALID_FD,
+           "Failed to accept raw TCP client");
 
     while (args->received_len < sizeof(args->received_bytes)) {
-        ssize_t result = recv(client_fd,
-                              args->received_bytes + args->received_len,
-                              sizeof(args->received_bytes) - args->received_len,
-                              0);
+        nexus_test_ssize_t result =
+            recv(client_fd,
+                 args->received_bytes + args->received_len,
+                 sizeof(args->received_bytes) - args->received_len,
+                 0);
         ASSERT(result >= 0, "Failed to receive from raw TCP client");
         if (result == 0) {
             break;
@@ -148,8 +125,8 @@ internal void* _nexus_raw_tcp_line_server(void* arg)
         }
     }
 
-    close(client_fd);
-    close(server_fd);
+    _nexus_test_close_fd(client_fd);
+    _nexus_test_close_fd(server_fd);
     return NULL;
 }
 
@@ -283,7 +260,7 @@ TEST_CASE(nexus, telnet_socket_reports_closed_after_final_reply)
 TEST_CASE(nexus, telnet_socket_sends_crlf_terminated_lines)
 {
     RawTcpServerArgs server_args = {
-        .port = _nexus_choose_telnet_test_port(SOCK_STREAM, IPPROTO_TCP),
+        .port = _nexus_choose_test_port(SOCK_STREAM, IPPROTO_TCP),
     };
     char url[64];
     snprintf(
@@ -327,23 +304,22 @@ TEST_CASE(nexus, telnet_character_mode_receives_one_character_per_message)
 
     _nexus_telnet_wait_for_server_start();
 
-    int client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    TEST_ASSERT(client_fd >= 0);
+    _nexus_test_net_init();
+    nexus_test_fd_t client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT(client_fd != NEXUS_TEST_INVALID_FD);
 
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port   = htons((u16)atoi(strrchr(server_args.url, ':') + 1)),
     };
-    TEST_ASSERT(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    TEST_ASSERT(_nexus_test_parse_loopback(&addr));
     TEST_ASSERT(connect(client_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0);
 
     u8    negotiation[12];
     usize received = 0;
     while (received < sizeof(negotiation)) {
-        ssize_t result = recv(client_fd,
-                              negotiation + received,
-                              sizeof(negotiation) - received,
-                              0);
+        nexus_test_ssize_t result =
+            recv(client_fd, negotiation + received, sizeof(negotiation) - received, 0);
         TEST_ASSERT(result > 0);
         received += (usize)result;
     }
@@ -366,9 +342,9 @@ TEST_CASE(nexus, telnet_character_mode_receives_one_character_per_message)
 
     const u8 payload[] = {'a', 'b', '\r', '\n'};
     TEST_ASSERT_EQ(send(client_fd, payload, sizeof(payload), 0),
-                   (ssize_t)sizeof(payload));
+                   (nexus_test_ssize_t)sizeof(payload));
 
-    close(client_fd);
+    _nexus_test_close_fd(client_fd);
     thread_join(&server_thread);
 
     TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
@@ -381,7 +357,7 @@ TEST_CASE(nexus, telnet_character_mode_receives_one_character_per_message)
 TEST_CASE(nexus, telnet_character_mode_sends_raw_bytes_without_crlf)
 {
     RawTcpServerArgs server_args = {
-        .port = _nexus_choose_telnet_test_port(SOCK_STREAM, IPPROTO_TCP),
+        .port = _nexus_choose_test_port(SOCK_STREAM, IPPROTO_TCP),
     };
     char url[64];
     snprintf(
@@ -428,20 +404,21 @@ TEST_CASE(nexus, telnet_socket_ignores_telnet_negotiation_bytes)
 
     _nexus_telnet_wait_for_server_start();
 
-    int client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    TEST_ASSERT(client_fd >= 0);
+    _nexus_test_net_init();
+    nexus_test_fd_t client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT(client_fd != NEXUS_TEST_INVALID_FD);
 
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port   = htons((u16)atoi(strrchr(server_args.url, ':') + 1)),
     };
-    TEST_ASSERT(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    TEST_ASSERT(_nexus_test_parse_loopback(&addr));
     TEST_ASSERT(connect(client_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0);
 
     u8    do_naws[3];
     usize received = 0;
     while (received < sizeof(do_naws)) {
-        ssize_t result =
+        nexus_test_ssize_t result =
             recv(client_fd, do_naws + received, sizeof(do_naws) - received, 0);
         TEST_ASSERT(result > 0);
         received += (usize)result;
@@ -461,18 +438,18 @@ TEST_CASE(nexus, telnet_socket_ignores_telnet_negotiation_bytes)
         '\n',
     };
     TEST_ASSERT_EQ(send(client_fd, payload, sizeof(payload), 0),
-                   (ssize_t)sizeof(payload));
+                   (nexus_test_ssize_t)sizeof(payload));
 
     u8 response[6];
     received = 0;
     while (received < sizeof(response)) {
-        ssize_t result = recv(
+        nexus_test_ssize_t result = recv(
             client_fd, response + received, sizeof(response) - received, 0);
         TEST_ASSERT(result > 0);
         received += (usize)result;
     }
 
-    close(client_fd);
+    _nexus_test_close_fd(client_fd);
     thread_join(&server_thread);
 
     TEST_ASSERT_EQ(server_args.bind_result, NET_OK);
@@ -495,20 +472,21 @@ TEST_CASE(nexus, telnet_socket_reports_negotiated_bounds_from_naws)
 
     _nexus_telnet_wait_for_server_start();
 
-    int client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    TEST_ASSERT(client_fd >= 0);
+    _nexus_test_net_init();
+    nexus_test_fd_t client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    TEST_ASSERT(client_fd != NEXUS_TEST_INVALID_FD);
 
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port   = htons((u16)atoi(strrchr(server_args.url, ':') + 1)),
     };
-    TEST_ASSERT(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    TEST_ASSERT(_nexus_test_parse_loopback(&addr));
     TEST_ASSERT(connect(client_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0);
 
     u8    do_naws[3];
     usize received = 0;
     while (received < sizeof(do_naws)) {
-        ssize_t result =
+        nexus_test_ssize_t result =
             recv(client_fd, do_naws + received, sizeof(do_naws) - received, 0);
         TEST_ASSERT(result > 0);
         received += (usize)result;
@@ -534,9 +512,9 @@ TEST_CASE(nexus, telnet_socket_reports_negotiated_bounds_from_naws)
         '\n',
     };
     TEST_ASSERT_EQ(send(client_fd, payload, sizeof(payload), 0),
-                   (ssize_t)sizeof(payload));
+                   (nexus_test_ssize_t)sizeof(payload));
 
-    close(client_fd);
+    _nexus_test_close_fd(client_fd);
     thread_join(&server_thread);
 
     TEST_ASSERT_EQ(server_args.bind_result, NET_OK);

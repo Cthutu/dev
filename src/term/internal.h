@@ -28,5 +28,9 @@ extern Arena    g_term_arena;
 
 enum { TERM_FB_CHAR_WIDE_TAIL = 0xFFFFFFFFu };
 
+// Shared character-width helper. Windows provides a local implementation;
+// POSIX uses the libc declaration from <wchar.h>.
+int wcwidth(u32 ucs);
+
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------

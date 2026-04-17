@@ -10,12 +10,38 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <unistd.h>
+
+#if OS_WINDOWS
+#    include <direct.h>
+#    include <io.h>
+typedef int log_ssize_t;
+#else
+#    include <unistd.h>
+typedef ssize_t log_ssize_t;
+#endif
+
+#if OS_WINDOWS
+#    define LOG_OPEN _open
+#    define LOG_READ _read
+#    define LOG_WRITE _write
+#    define LOG_CLOSE _close
+#    define LOG_UNLINK _unlink
+#    define LOG_MKDIR(path) _mkdir(path)
+#    define LOG_OPEN_FLAGS (O_BINARY)
+#else
+#    define LOG_OPEN open
+#    define LOG_READ read
+#    define LOG_WRITE write
+#    define LOG_CLOSE close
+#    define LOG_UNLINK unlink
+#    define LOG_MKDIR(path) mkdir((path), 0777)
+#    define LOG_OPEN_FLAGS (0)
+#endif
 
 internal bool _log_write_all(int fd, const u8* data, usize len)
 {
     while (len > 0) {
-        ssize_t written = write(fd, data, len);
+        log_ssize_t written = LOG_WRITE(fd, data, len);
         if (written < 0) {
             if (errno == EINTR) {
                 continue;
@@ -36,7 +62,7 @@ internal bool _log_ensure_path(Log* log)
         return false;
     }
 
-    if (mkdir("_tmp", 0777) < 0 && errno != EEXIST) {
+    if (LOG_MKDIR("_tmp") < 0 && errno != EEXIST) {
         return false;
     }
 
@@ -44,12 +70,19 @@ internal bool _log_ensure_path(Log* log)
         return true;
     }
 
+#if OS_WINDOWS
+    UINT result = GetTempFileNameA("_tmp", "log", 0, log->path);
+    if (result == 0) {
+        log->path[0] = 0;
+        return false;
+    }
+#else
     cstr name = "log";
     int  len  = snprintf(log->path,
-                        sizeof(log->path),
-                        "%s/%s-XXXXXX",
-                        "_tmp",
-                        name);
+                         sizeof(log->path),
+                         "%s/%s-XXXXXX",
+                         "_tmp",
+                         name);
     if (len < 0 || (usize)len >= sizeof(log->path)) {
         log->path[0] = 0;
         return false;
@@ -61,7 +94,8 @@ internal bool _log_ensure_path(Log* log)
         return false;
     }
 
-    close(fd);
+    LOG_CLOSE(fd);
+#endif
     return true;
 }
 
@@ -71,13 +105,13 @@ bool log_append(Log* log, const void* data, usize len)
         return false;
     }
 
-    int fd = open(log->path, O_WRONLY | O_APPEND | O_CREAT, 0666);
+    int fd = LOG_OPEN(log->path, O_WRONLY | O_APPEND | O_CREAT | LOG_OPEN_FLAGS, 0666);
     if (fd < 0) {
         return false;
     }
 
     bool ok = _log_write_all(fd, data, len);
-    close(fd);
+    LOG_CLOSE(fd);
     return ok;
 }
 

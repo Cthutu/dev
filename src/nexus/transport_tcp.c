@@ -6,15 +6,7 @@
 
 #include <nexus/internal.h>
 
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 //------------------------------------------------------------------------------
 // _net_tcp_transport_ops
@@ -53,7 +45,8 @@ bool _net_socket_nonblocking(Net_Socket* sock)
 //------------------------------------------------------------------------------
 // _net_timeout_poll_ms
 //
-// Converts an absolute deadline into the integer timeout expected by `poll()`.
+// Converts an absolute deadline into the integer timeout expected by the
+// lowlevel poll.
 //------------------------------------------------------------------------------
 
 int _net_timeout_poll_ms(TimePoint deadline)
@@ -74,47 +67,43 @@ int _net_timeout_poll_ms(TimePoint deadline)
 //------------------------------------------------------------------------------
 // _net_poll_fd
 //
-// Waits for the requested readiness on one file descriptor until the deadline
+// Waits for the requested readiness on one socket handle until the deadline
 // expires.
 //------------------------------------------------------------------------------
 
 Net_Result
-_net_poll_fd(int fd, short events, TimePoint deadline, bool nonblocking)
+_net_poll_fd(Net_Fd fd, u16 events, TimePoint deadline, bool nonblocking)
 {
-    struct pollfd poll_fd = {
+    Net_PollFd poll_fd = {
         .fd     = fd,
         .events = events,
     };
 
     while (true) {
-        int poll_result = poll(&poll_fd, 1, _net_timeout_poll_ms(deadline));
+        int poll_result = net_os_poll(&poll_fd, 1, _net_timeout_poll_ms(deadline));
         if (poll_result == 0) {
             return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
         }
 
         if (poll_result < 0) {
-            if (errno == EINTR) {
+            Net_OsError err = net_os_last_error();
+            if (err == NET_OS_INTR) {
                 continue;
             }
 
-            _net_log_error();
-            switch (errno) {
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            default:
-                return NET_ERROR;
-            }
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
 
         if (poll_fd.revents & events) {
             return NET_OK;
         }
 
-        if (poll_fd.revents & POLLHUP) {
+        if (poll_fd.revents & NET_POLL_HUP) {
             return NET_CLOSED;
         }
 
-        if (poll_fd.revents & (POLLERR | POLLNVAL)) {
+        if (poll_fd.revents & (NET_POLL_ERR | NET_POLL_NVAL)) {
             return NET_ERROR;
         }
     }
@@ -123,39 +112,30 @@ _net_poll_fd(int fd, short events, TimePoint deadline, bool nonblocking)
 //------------------------------------------------------------------------------
 // _net_tcp_send_all_fd
 //
-// Writes the full buffer to the given TCP file descriptor, retrying partial
-// writes until the requested byte count has been sent or an error occurs.
+// Writes the full buffer to the given TCP socket, retrying partial writes
+// until the requested byte count has been sent or an error occurs.
 //------------------------------------------------------------------------------
 
 Net_Result _net_tcp_send_all_fd(
-    int fd, const u8* buffer, usize len, TimePoint deadline, bool nonblocking)
+    Net_Fd fd, const u8* buffer, usize len, TimePoint deadline, bool nonblocking)
 {
-    usize sent  = 0;
-    int   flags = 0;
-
-#if defined(MSG_NOSIGNAL)
-    flags |= MSG_NOSIGNAL;
-#endif
+    usize sent = 0;
 
     while (sent < len) {
         Net_Result wait_result =
-            _net_poll_fd(fd, POLLOUT, deadline, nonblocking);
+            _net_poll_fd(fd, NET_POLL_OUT, deadline, nonblocking);
         if (NET_FAILED(wait_result)) {
             return wait_result;
         }
 
-        ssize_t result = send(fd, buffer + sent, len - sent, flags);
+        isize result = net_os_send(fd, buffer + sent, len - sent);
         if (result < 0) {
-            _net_log_error();
-            switch (errno) {
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            case EPIPE:
-            case ECONNRESET:
-                return NET_CLOSED;
-            default:
-                return NET_ERROR;
+            Net_OsError err = net_os_last_error();
+            if (err == NET_OS_WOULD_BLOCK || err == NET_OS_INTR) {
+                continue;
             }
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
 
         if (result == 0) {
@@ -192,55 +172,41 @@ internal u64 _net_tcp_connect_retry_interval_ms(Net_Socket* sock)
 // server to bind and begin listening.
 //------------------------------------------------------------------------------
 
-internal bool _net_tcp_should_retry_connect(int err)
+internal bool _net_tcp_should_retry_connect(Net_OsError err)
 {
     switch (err) {
-    case ECONNREFUSED:
-    case ETIMEDOUT:
-    case EHOSTUNREACH:
-    case ENETUNREACH:
+    case NET_OS_CONN_REFUSED:
+    case NET_OS_TIMED_OUT:
+    case NET_OS_HOST_UNREACH:
+    case NET_OS_NET_UNREACH:
         return true;
     default:
         return false;
     }
 }
 
-internal Net_Result _net_tcp_available_bytes(int fd, usize* out_available)
-{
-    int available = 0;
-    if (ioctl(fd, FIONREAD, &available) < 0) {
-        _net_log_error();
-        return NET_ERROR;
-    }
-
-    *out_available = (usize)MAX(available, 0);
-    return NET_OK;
-}
-
-internal Net_Result _net_tcp_peek_frame_length(int    fd,
+internal Net_Result _net_tcp_peek_frame_length(Net_Fd fd,
                                                usize* out_frame_len,
                                                bool   nonblocking)
 {
-    u32     header = 0;
-    ssize_t peeked = recv(fd, &header, sizeof(header), MSG_PEEK | MSG_DONTWAIT);
+    u32   header = 0;
+    isize peeked = net_os_recv(
+        fd, &header, sizeof(header), NET_OS_RECV_PEEK | NET_OS_RECV_DONTWAIT);
     if (peeked == 0) {
         return NET_CLOSED;
     }
 
     if (peeked < 0) {
-        switch (errno) {
-        case EAGAIN:
-#if EWOULDBLOCK != EAGAIN
-        case EWOULDBLOCK:
-#endif
+        Net_OsError err = net_os_last_error();
+        switch (err) {
+        case NET_OS_WOULD_BLOCK:
             return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case ECONNRESET:
+        case NET_OS_CONN_RESET:
+        case NET_OS_CLOSED:
             return NET_CLOSED;
         default:
-            _net_log_error();
-            return NET_ERROR;
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
     }
 
@@ -248,12 +214,12 @@ internal Net_Result _net_tcp_peek_frame_length(int    fd,
         return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
     }
 
-    *out_frame_len = (usize)ntohl(header);
+    *out_frame_len = (usize)net_os_ntoh32(header);
     return NET_OK;
 }
 
 internal Net_Result _net_tcp_wait_for_full_frame(Net_Socket* sock,
-                                                 int         fd,
+                                                 Net_Fd      fd,
                                                  TimePoint   deadline,
                                                  usize*      out_frame_len)
 {
@@ -261,7 +227,7 @@ internal Net_Result _net_tcp_wait_for_full_frame(Net_Socket* sock,
 
     while (true) {
         Net_Result wait_result =
-            _net_poll_fd(fd, POLLIN, deadline, nonblocking);
+            _net_poll_fd(fd, NET_POLL_IN, deadline, nonblocking);
         if (NET_FAILED(wait_result)) {
             return wait_result;
         }
@@ -279,10 +245,11 @@ internal Net_Result _net_tcp_wait_for_full_frame(Net_Socket* sock,
             return result;
         }
 
-        usize available = 0;
-        result          = _net_tcp_available_bytes(fd, &available);
-        if (NET_FAILED(result)) {
-            return result;
+        usize       available = 0;
+        Net_OsError err       = net_os_available_bytes(fd, &available);
+        if (err != NET_OS_OK) {
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
 
         usize needed = sizeof(u32) + frame_len;
@@ -301,11 +268,11 @@ internal Net_Result _net_tcp_wait_for_full_frame(Net_Socket* sock,
 //------------------------------------------------------------------------------
 // _net_tcp_recv_exact_fd
 //
-// Reads exactly the requested number of bytes from a TCP file descriptor. This
-// is the primitive used to assemble framed messages from the stream transport.
+// Reads exactly the requested number of bytes from a TCP socket. This is the
+// primitive used to assemble framed messages from the stream transport.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_tcp_recv_exact_fd(int       fd,
+internal Net_Result _net_tcp_recv_exact_fd(Net_Fd    fd,
                                            void*     buffer,
                                            usize     len,
                                            TimePoint deadline)
@@ -314,22 +281,20 @@ internal Net_Result _net_tcp_recv_exact_fd(int       fd,
     usize recv_size = 0;
 
     while (recv_size < len) {
-        Net_Result wait_result = _net_poll_fd(fd, POLLIN, deadline, false);
+        Net_Result wait_result =
+            _net_poll_fd(fd, NET_POLL_IN, deadline, false);
         if (NET_FAILED(wait_result)) {
             return wait_result;
         }
 
-        ssize_t result = recv(fd, out + recv_size, len - recv_size, 0);
+        isize result = net_os_recv(fd, out + recv_size, len - recv_size, 0);
         if (result < 0) {
-            _net_log_error();
-            switch (errno) {
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            case ECONNRESET:
-                return NET_CLOSED;
-            default:
-                return NET_ERROR;
+            Net_OsError err = net_os_last_error();
+            if (err == NET_OS_WOULD_BLOCK || err == NET_OS_INTR) {
+                continue;
             }
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
 
         if (result == 0) {
@@ -349,7 +314,7 @@ internal Net_Result _net_tcp_recv_exact_fd(int       fd,
 // the stream in sync when we detect an oversized or otherwise invalid frame.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_tcp_discard_exact_fd(int       fd,
+internal Net_Result _net_tcp_discard_exact_fd(Net_Fd    fd,
                                               usize     len,
                                               TimePoint deadline)
 {
@@ -375,13 +340,13 @@ internal Net_Result _net_tcp_discard_exact_fd(int       fd,
 //------------------------------------------------------------------------------
 // _net_tcp_send_framed_fd
 //
-// Sends one framed TCP message via the provided file descriptor.
+// Sends one framed TCP message via the provided socket handle.
 //------------------------------------------------------------------------------
 
-Net_Result _net_tcp_send_framed_fd(int fd, const void* buffer, usize len)
+Net_Result _net_tcp_send_framed_fd(Net_Fd fd, const void* buffer, usize len)
 {
     TimePoint deadline  = 0;
-    u32       frame_len = htonl((u32)len);
+    u32       frame_len = net_os_hton32((u32)len);
 
     Net_Result result   = _net_tcp_send_all_fd(
         fd, (const u8*)&frame_len, sizeof(frame_len), deadline, false);
@@ -397,29 +362,6 @@ Net_Result _net_tcp_send_framed_fd(int fd, const void* buffer, usize len)
 }
 
 //------------------------------------------------------------------------------
-// _net_tcp_set_nonblocking
-//
-// Puts the file descriptor into non-blocking mode. This is only used for the
-// listening socket so the server can drain pending accepts without blocking.
-//------------------------------------------------------------------------------
-
-internal Net_Result _net_tcp_set_nonblocking(int fd)
-{
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) {
-        _net_log_error();
-        return NET_ERROR;
-    }
-
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        _net_log_error();
-        return NET_ERROR;
-    }
-
-    return NET_OK;
-}
-
-//------------------------------------------------------------------------------
 // _net_tcp_accept_pending
 //
 // Accepts every currently queued client connection and converts each one into
@@ -429,26 +371,24 @@ internal Net_Result _net_tcp_set_nonblocking(int fd)
 internal Net_Result _net_tcp_accept_pending(Net_Socket* sock)
 {
     while (true) {
-        int client_fd = accept(sock->fd, NULL, NULL);
-        if (client_fd < 0) {
-            switch (errno) {
-            case EAGAIN:
-#if EWOULDBLOCK != EAGAIN
-            case EWOULDBLOCK:
-#endif
+        Net_Fd      client_fd = NET_INVALID_FD;
+        Net_OsError err       = net_os_accept(sock->fd, &client_fd);
+        if (err != NET_OS_OK) {
+            if (err == NET_OS_WOULD_BLOCK) {
                 return NET_OK;
-            case EMFILE:
-            case ENFILE:
-                return NET_OUT_OF_FD;
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            default:
-                _net_log_error();
-                return NET_ERROR;
             }
+
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
 
         Net_Pipe* pipe = _net_pipe_create_tcp(sock, client_fd);
+        err            = net_os_set_nonblocking(client_fd, true);
+        if (err != NET_OS_OK) {
+            _net_pipe_close(pipe);
+            net_os_log_error();
+            return _net_result_from_os_error(err);
+        }
         if (sock->kind == NET_SOCKET_TELNET) {
             Net_Result result =
                 _net_telnet_request_session_state(sock, client_fd);
@@ -471,14 +411,14 @@ internal Net_Result _net_tcp_accept_pending(Net_Socket* sock)
 Net_Result
 _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline)
 {
-    bool            nonblocking  = _net_socket_nonblocking(sock);
-    Net_SocketData* data         = _net_socket_data(sock);
-    Array(struct pollfd) pollfds = 0;
-    Array(Net_Pipe*) pipes       = 0;
+    bool            nonblocking = _net_socket_nonblocking(sock);
+    Net_SocketData* data        = _net_socket_data(sock);
+    Array(Net_PollFd) pollfds   = 0;
+    Array(Net_Pipe*) pipes      = 0;
 
-    struct pollfd listener       = {
-              .fd     = sock->fd,
-              .events = POLLIN,
+    Net_PollFd listener = {
+        .fd     = sock->fd,
+        .events = NET_POLL_IN,
     };
     array_push(pollfds, listener);
     array_push(pipes, NULL);
@@ -486,38 +426,34 @@ _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline)
     for (usize i = 0; i < array_count(data->pipes); ++i) {
         Net_Pipe* pipe = data->pipes[i];
         if (!pipe || pipe->kind != NET_PIPE_TCP || pipe->closed ||
-            pipe->tcp.fd < 0) {
+            pipe->tcp.fd == NET_INVALID_FD) {
             continue;
         }
 
-        struct pollfd client = {
+        Net_PollFd client = {
             .fd     = pipe->tcp.fd,
-            .events = POLLIN,
+            .events = NET_POLL_IN,
         };
         array_push(pollfds, client);
         array_push(pipes, pipe);
     }
 
-    int poll_result =
-        poll(pollfds, array_count(pollfds), _net_timeout_poll_ms(deadline));
+    int poll_result = net_os_poll(
+        pollfds, array_count(pollfds), _net_timeout_poll_ms(deadline));
     if (poll_result == 0) {
         array_free(pollfds);
         array_free(pipes);
         return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
     }
     if (poll_result < 0) {
+        Net_OsError err = net_os_last_error();
         array_free(pollfds);
         array_free(pipes);
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        default:
-            return NET_ERROR;
-        }
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
-    if (pollfds[0].revents & POLLIN) {
+    if (pollfds[0].revents & NET_POLL_IN) {
         Net_Result result = _net_tcp_accept_pending(sock);
         if (NET_FAILED(result)) {
             array_free(pollfds);
@@ -528,7 +464,8 @@ _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline)
 
     *out = NULL;
     for (usize i = 1; i < array_count(pollfds); ++i) {
-        if (pollfds[i].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) {
+        if (pollfds[i].revents &
+            (NET_POLL_IN | NET_POLL_HUP | NET_POLL_ERR | NET_POLL_NVAL)) {
             *out = pipes[i];
             break;
         }
@@ -553,7 +490,7 @@ internal usize _net_tcp_open_pipe_count(Net_Socket* sock)
     for (usize i = 0; i < array_count(data->pipes); ++i) {
         Net_Pipe* pipe = data->pipes[i];
         if (!pipe || pipe->kind != NET_PIPE_TCP || pipe->closed ||
-            pipe->tcp.fd < 0) {
+            pipe->tcp.fd == NET_INVALID_FD) {
             continue;
         }
 
@@ -566,13 +503,13 @@ internal usize _net_tcp_open_pipe_count(Net_Socket* sock)
 //------------------------------------------------------------------------------
 // _net_tcp_recv_message_from_fd
 //
-// Receives one framed TCP message from the given file descriptor and stores it
-// as the socket's pending message. When a pipe is provided, the pending message
-// keeps that pipe as hidden reply context.
+// Receives one framed TCP message from the given socket handle and stores it
+// as the socket's pending message. When a pipe is provided, the pending
+// message keeps that pipe as hidden reply context.
 //------------------------------------------------------------------------------
 
 internal Net_Result _net_tcp_recv_message_from_fd(Net_Socket* sock,
-                                                  int         fd,
+                                                  Net_Fd      fd,
                                                   Net_Pipe*   pipe,
                                                   TimePoint   deadline)
 {
@@ -632,54 +569,37 @@ internal Net_Result _net_tcp_recv_message_from_fd(Net_Socket* sock,
 
 Net_Result _net_tcp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
 {
-    int fd = _net_create_socket(endpoint);
-    if (fd < 0) {
-        _net_log_error();
-        switch (errno) {
-        case EMFILE:
-        case ENFILE:
-            return NET_OUT_OF_FD;
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EPROTONOSUPPORT:
-            return NET_PROTOCOL_NOT_SUPPORTED;
-        default:
-            return NET_ERROR;
-        }
+    Net_Fd fd = _net_create_socket(endpoint);
+    if (fd == NET_INVALID_FD) {
+        Net_OsError err = net_os_last_error();
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
-    int reuse_addr = 1;
-    (void)setsockopt(
-        fd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+    (void)net_os_set_reuseaddr(fd);
 
-    struct sockaddr_in addr;
-    _net_endpoint_to_addr(endpoint, &addr);
+    Net_Addr addr;
+    net_os_addr_from_endpoint(endpoint, &addr);
 
-    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EACCES:
-            return NET_ACCESS_DENIED;
-        case EADDRINUSE:
-            return NET_PORT_IN_USE;
-        default:
-            return NET_ERROR;
-        }
+    Net_OsError err = net_os_bind(fd, &addr);
+    if (err != NET_OS_OK) {
+        net_os_close(fd);
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
-    if (listen(fd, SOMAXCONN) < 0) {
-        close(fd);
-        _net_log_error();
-        return NET_ERROR;
+    err = net_os_listen(fd);
+    if (err != NET_OS_OK) {
+        net_os_close(fd);
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
-    Net_Result nonblocking_result = _net_tcp_set_nonblocking(fd);
-    if (NET_FAILED(nonblocking_result)) {
-        close(fd);
-        return nonblocking_result;
+    err = net_os_set_nonblocking(fd, true);
+    if (err != NET_OS_OK) {
+        net_os_close(fd);
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
     sock->fd    = fd;
@@ -701,8 +621,8 @@ Net_Result _net_tcp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
 
 Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 {
-    struct sockaddr_in addr;
-    _net_endpoint_to_addr(endpoint, &addr);
+    Net_Addr addr;
+    net_os_addr_from_endpoint(endpoint, &addr);
     Net_SocketData* data        = _net_socket_data_ensure(sock);
     bool            nonblocking = _net_socket_nonblocking(sock);
     u64             connect_timeout_ms =
@@ -710,23 +630,15 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
     TimePoint start_time = time_now();
 
     while (true) {
-        int fd = _net_create_socket(endpoint);
-        if (fd < 0) {
-            _net_log_error();
-            switch (errno) {
-            case EMFILE:
-            case ENFILE:
-                return NET_OUT_OF_FD;
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            case EPROTONOSUPPORT:
-                return NET_PROTOCOL_NOT_SUPPORTED;
-            default:
-                return NET_ERROR;
-            }
+        Net_Fd fd = _net_create_socket(endpoint);
+        if (fd == NET_INVALID_FD) {
+            Net_OsError err = net_os_last_error();
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
 
-        if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+        Net_OsError connect_err = net_os_connect(fd, &addr);
+        if (connect_err == NET_OS_OK) {
             sock->fd    = fd;
             sock->proto = NET_PROTO_TCP;
             sock->state = NET_STATE_CONNECTED;
@@ -738,23 +650,22 @@ Net_Result _net_tcp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
             return NET_OK;
         }
 
-        int connect_error = errno;
-        close(fd);
+        net_os_close(fd);
 
-        switch (connect_error) {
-        case ENETDOWN:
-            _net_log_error();
+        switch (connect_err) {
+        case NET_OS_NET_DOWN:
+            net_os_log_error();
             return NET_NO_NETWORK;
-        case EACCES:
-            _net_log_error();
+        case NET_OS_ACCESS_DENIED:
+            net_os_log_error();
             return NET_ACCESS_DENIED;
         default:
             break;
         }
 
-        if (!_net_tcp_should_retry_connect(connect_error)) {
-            _net_log_error();
-            return NET_ERROR;
+        if (!_net_tcp_should_retry_connect(connect_err)) {
+            net_os_log_error();
+            return _net_result_from_os_error(connect_err);
         }
 
         if (connect_timeout_ms == NET_WAIT_IMMEDIATE) {
@@ -796,7 +707,7 @@ Net_Result _net_tcp_send(Net_Socket* sock, const void* buffer, usize len)
         nonblocking ? time_now()
                     : _net_timeout_deadline_from_option(
                           _net_socket_data(sock)->options.send_timeout_ms);
-    u32 frame_len     = htonl((u32)len);
+    u32 frame_len     = net_os_hton32((u32)len);
 
     Net_Result result = _net_tcp_send_all_fd(sock->fd,
                                              (const u8*)&frame_len,
@@ -817,8 +728,9 @@ Net_Result _net_tcp_send(Net_Socket* sock, const void* buffer, usize len)
 //------------------------------------------------------------------------------
 // _net_tcp_recv_message
 //
-// Receives exactly one framed TCP message and stores it in the socket's pending
-// buffer so the public receive API can apply retry/drop semantics consistently.
+// Receives exactly one framed TCP message and stores it in the socket's
+// pending buffer so the public receive API can apply retry/drop semantics
+// consistently.
 //------------------------------------------------------------------------------
 
 Net_Result _net_tcp_recv_message(Net_Socket* sock)

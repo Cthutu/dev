@@ -6,10 +6,7 @@
 
 #include <nexus/internal.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
 #include <stdio.h>
-#include <sys/socket.h>
 
 //------------------------------------------------------------------------------
 // _net_hton_u64
@@ -20,8 +17,8 @@
 internal u64 _net_hton_u64(u64 value)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    return ((u64)htonl((u32)(value & 0xffffffffull)) << 32) |
-           (u64)htonl((u32)(value >> 32));
+    return ((u64)net_os_hton32((u32)(value & 0xffffffffull)) << 32) |
+           (u64)net_os_hton32((u32)(value >> 32));
 #else
     return value;
 #endif
@@ -36,8 +33,8 @@ internal u64 _net_hton_u64(u64 value)
 internal u64 _net_ntoh_u64(u64 value)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    return ((u64)ntohl((u32)(value & 0xffffffffull)) << 32) |
-           (u64)ntohl((u32)(value >> 32));
+    return ((u64)net_os_ntoh32((u32)(value & 0xffffffffull)) << 32) |
+           (u64)net_os_ntoh32((u32)(value >> 32));
 #else
     return value;
 #endif
@@ -206,7 +203,7 @@ void net_message_append_string(Net_Message* msg, string value)
 
 void net_message_append_u16(Net_Message* msg, u16 value)
 {
-    u16 network_value = htons(value);
+    u16 network_value = net_os_hton16(value);
     net_message_append(msg, &network_value, sizeof(network_value));
 }
 
@@ -218,7 +215,7 @@ void net_message_append_u16(Net_Message* msg, u16 value)
 
 void net_message_append_u32(Net_Message* msg, u32 value)
 {
-    u32 network_value = htonl(value);
+    u32 network_value = net_os_hton32(value);
     net_message_append(msg, &network_value, sizeof(network_value));
 }
 
@@ -315,7 +312,7 @@ bool net_message_read_u16(Net_Message* msg, u16* out_value)
         return false;
     }
 
-    *out_value = ntohs(network_value);
+    *out_value = net_os_ntoh16(network_value);
     return true;
 }
 
@@ -332,7 +329,7 @@ bool net_message_read_u32(Net_Message* msg, u32* out_value)
         return false;
     }
 
-    *out_value = ntohl(network_value);
+    *out_value = net_os_ntoh32(network_value);
     return true;
 }
 
@@ -391,20 +388,15 @@ bool net_message_url(Net_Message* msg, string* out_url)
         return false;
     }
 
-    struct sockaddr_in addr   = {0};
-    cstr               scheme = NULL;
+    Net_Addr addr   = {0};
+    cstr     scheme = NULL;
 
     switch (data->pipe->kind) {
     case NET_PIPE_TCP:
-        {
-            socklen_t addr_len = sizeof(addr);
-            if (getpeername(data->pipe->tcp.fd,
-                            (struct sockaddr*)&addr,
-                            &addr_len) < 0) {
-                return false;
-            }
-            scheme = "tcp";
+        if (net_os_getpeername(data->pipe->tcp.fd, &addr) != NET_OS_OK) {
+            return false;
         }
+        scheme = "tcp";
         break;
 
     case NET_PIPE_UDP:
@@ -416,8 +408,8 @@ bool net_message_url(Net_Message* msg, string* out_url)
         return false;
     }
 
-    char ip_buffer[INET_ADDRSTRLEN];
-    if (!inet_ntop(AF_INET, &addr.sin_addr, ip_buffer, sizeof(ip_buffer))) {
+    char ip_buffer[64];
+    if (!net_os_addr_format_ip(&addr, ip_buffer, sizeof(ip_buffer))) {
         return false;
     }
 
@@ -427,7 +419,7 @@ bool net_message_url(Net_Message* msg, string* out_url)
                            "%s://%s:%u",
                            scheme,
                            ip_buffer,
-                           (unsigned)ntohs(addr.sin_port));
+                           (unsigned)addr.port);
     if (written < 0) {
         return false;
     }

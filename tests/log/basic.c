@@ -5,20 +5,38 @@
 #include <test.h>
 
 #include <fcntl.h>
-#include <unistd.h>
+
+#if OS_WINDOWS
+#    include <io.h>
+typedef int log_test_ssize_t;
+#    define LOG_TEST_OPEN _open
+#    define LOG_TEST_READ _read
+#    define LOG_TEST_CLOSE _close
+#    define LOG_TEST_UNLINK _unlink
+#    define LOG_TEST_OPEN_FLAGS (O_BINARY)
+#else
+#    include <unistd.h>
+typedef ssize_t log_test_ssize_t;
+#    define LOG_TEST_OPEN open
+#    define LOG_TEST_READ read
+#    define LOG_TEST_CLOSE close
+#    define LOG_TEST_UNLINK unlink
+#    define LOG_TEST_OPEN_FLAGS (0)
+#endif
 
 internal bool _log_test_read_all(cstr path, char* buffer, usize buffer_size)
 {
-    int fd = open(path, O_RDONLY);
+    int fd = LOG_TEST_OPEN(path, O_RDONLY | LOG_TEST_OPEN_FLAGS);
     if (fd < 0) {
         return false;
     }
 
     usize total = 0;
     while (total + 1 < buffer_size) {
-        ssize_t read_len = read(fd, buffer + total, buffer_size - total - 1);
+        log_test_ssize_t read_len =
+            LOG_TEST_READ(fd, buffer + total, buffer_size - total - 1);
         if (read_len < 0) {
-            close(fd);
+            LOG_TEST_CLOSE(fd);
             return false;
         }
         if (read_len == 0) {
@@ -29,7 +47,7 @@ internal bool _log_test_read_all(cstr path, char* buffer, usize buffer_size)
     }
 
     buffer[total] = 0;
-    close(fd);
+    LOG_TEST_CLOSE(fd);
     return true;
 }
 
@@ -49,5 +67,5 @@ TEST_CASE(log, temp_file_can_be_created_and_appended)
     TEST_ASSERT(_log_test_read_all(path, contents, sizeof(contents)));
     TEST_ASSERT_STR_EQ(contents, "hello world 42");
 
-    TEST_ASSERT_EQ(unlink(path), 0);
+    TEST_ASSERT_EQ(LOG_TEST_UNLINK(path), 0);
 }

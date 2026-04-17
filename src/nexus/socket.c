@@ -6,9 +6,6 @@
 
 #include <nexus/internal.h>
 
-#include <errno.h>
-#include <unistd.h>
-
 //------------------------------------------------------------------------------
 // _net_message_protocol_ops
 //
@@ -139,7 +136,7 @@ Net_Socket net_socket(void)
 {
     Net_Socket sock = (Net_Socket){
         .state = NET_STATE_DISCONNECTED,
-        .fd    = -1,
+        .fd    = NET_INVALID_FD,
         .kind  = NET_SOCKET_BASIC,
     };
 
@@ -158,7 +155,7 @@ Net_Socket net_request_socket(void)
 {
     Net_Socket sock = (Net_Socket){
         .state = NET_STATE_DISCONNECTED,
-        .fd    = -1,
+        .fd    = NET_INVALID_FD,
         .kind  = NET_SOCKET_REQUEST,
     };
     _net_socket_set_ops(&sock, NULL, &_net_reqrep_protocol_ops);
@@ -177,7 +174,7 @@ Net_Socket net_reply_socket(void)
 {
     Net_Socket sock = (Net_Socket){
         .state = NET_STATE_DISCONNECTED,
-        .fd    = -1,
+        .fd    = NET_INVALID_FD,
         .kind  = NET_SOCKET_REPLY,
     };
     _net_socket_set_ops(&sock, NULL, &_net_reqrep_protocol_ops);
@@ -196,7 +193,7 @@ Net_Socket net_telnet_socket(void)
 {
     Net_Socket sock = (Net_Socket){
         .state = NET_STATE_DISCONNECTED,
-        .fd    = -1,
+        .fd    = NET_INVALID_FD,
         .kind  = NET_SOCKET_TELNET,
     };
     _net_socket_set_ops(&sock, NULL, &_net_message_protocol_ops);
@@ -214,13 +211,13 @@ void net_close(Net_Socket* sock)
 {
     _net_socket_close_pipes(sock);
 
-    if (sock->fd >= 0) {
+    if (sock->fd != NET_INVALID_FD) {
         if (sock->kind == NET_SOCKET_TELNET) {
             _net_tcp_close_telnet_fd(sock->fd);
         } else {
-            close(sock->fd);
+            net_os_close(sock->fd);
         }
-        sock->fd = -1;
+        sock->fd = NET_INVALID_FD;
     }
 
     _net_socket_clear_pending(sock);
@@ -281,59 +278,55 @@ cstr net_result_string(Net_Result result)
 }
 
 //------------------------------------------------------------------------------
-// _net_log_error
-//
-// Logs the current network error in debug builds. Public APIs translate these
-// platform errors into the smaller `Net_Result` space.
-//------------------------------------------------------------------------------
-
-void _net_log_error(void)
-{
-#if DEBUG
-    int err = errno;
-    prn("Network error: %s", strerror(err));
-#endif
-}
-
-//------------------------------------------------------------------------------
 // _net_create_socket
 //
 // Creates a raw operating-system socket matching the endpoint protocol. The
-// returned file descriptor is not bound or connected yet.
+// returned handle is not bound or connected yet.
 //------------------------------------------------------------------------------
 
-int _net_create_socket(Net_Endpoint* endpoint)
+Net_Fd _net_create_socket(Net_Endpoint* endpoint)
 {
-    int sock_type  = 0;
-    int proto_type = 0;
-    switch (endpoint->proto) {
-    case NET_PROTO_TCP:
-        sock_type  = SOCK_STREAM;
-        proto_type = IPPROTO_TCP;
-        break;
-    case NET_PROTO_UDP:
-        sock_type  = SOCK_DGRAM;
-        proto_type = IPPROTO_UDP;
-        break;
-    default:
-        return -1;
-    }
-
-    return socket(AF_INET, sock_type, proto_type);
+    return net_os_socket(endpoint->proto);
 }
 
 //------------------------------------------------------------------------------
-// _net_endpoint_to_addr
+// _net_result_from_os_error
 //
-// Converts the parsed Nexus endpoint into a `sockaddr_in` ready for bind or
-// connect.
+// Maps the canonical lowlevel error to the closest public `Net_Result`. Codes
+// without a dedicated public slot fall through to `NET_ERROR`.
 //------------------------------------------------------------------------------
 
-void _net_endpoint_to_addr(Net_Endpoint* endpoint, struct sockaddr_in* out_addr)
+Net_Result _net_result_from_os_error(Net_OsError err)
 {
-    out_addr->sin_family = AF_INET;
-    out_addr->sin_port   = htons(endpoint->port);
-    memcpy(&out_addr->sin_addr, endpoint->ip, 4);
+    switch (err) {
+    case NET_OS_OK:
+        return NET_OK;
+    case NET_OS_WOULD_BLOCK:
+        return NET_WOULD_BLOCK;
+    case NET_OS_NET_DOWN:
+    case NET_OS_NET_UNREACH:
+    case NET_OS_HOST_UNREACH:
+        return NET_NO_NETWORK;
+    case NET_OS_CONN_REFUSED:
+    case NET_OS_CONN_RESET:
+    case NET_OS_PIPE_BROKEN:
+    case NET_OS_CLOSED:
+        return NET_CLOSED;
+    case NET_OS_TIMED_OUT:
+        return NET_TIMEOUT;
+    case NET_OS_ADDR_IN_USE:
+        return NET_PORT_IN_USE;
+    case NET_OS_ACCESS_DENIED:
+        return NET_ACCESS_DENIED;
+    case NET_OS_OUT_OF_FD:
+        return NET_OUT_OF_FD;
+    case NET_OS_PROTO_NOT_SUPPORTED:
+        return NET_PROTOCOL_NOT_SUPPORTED;
+    case NET_OS_INTR:
+    case NET_OS_OTHER:
+    default:
+        return NET_ERROR;
+    }
 }
 
 //------------------------------------------------------------------------------

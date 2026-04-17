@@ -6,12 +6,7 @@
 
 #include <nexus/internal.h>
 
-#include <errno.h>
 #include <limits.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 //------------------------------------------------------------------------------
 // _net_udp_transport_ops
@@ -31,10 +26,10 @@ internal const Net_TransportOps _net_udp_transport_ops = {
 // A timeout of `NET_WAIT_INFINITE` blocks forever.
 //------------------------------------------------------------------------------
 
-internal Net_Result _net_udp_wait_fd(int   fd,
-                                     short events,
-                                     u64   timeout_ms,
-                                     bool  nonblocking)
+internal Net_Result _net_udp_wait_fd(Net_Fd fd,
+                                     u16    events,
+                                     u64    timeout_ms,
+                                     bool   nonblocking)
 {
     int timeout = -1;
     if (nonblocking) {
@@ -43,32 +38,28 @@ internal Net_Result _net_udp_wait_fd(int   fd,
         timeout = (int)MIN(timeout_ms, (u64)INT_MAX);
     }
 
-    struct pollfd poll_fd = {
+    Net_PollFd poll_fd = {
         .fd     = fd,
         .events = events,
     };
 
     while (true) {
-        int poll_result = poll(&poll_fd, 1, timeout);
+        int poll_result = net_os_poll(&poll_fd, 1, timeout);
         if (poll_result == 0) {
             return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
         }
 
         if (poll_result < 0) {
-            if (errno == EINTR) {
+            Net_OsError err = net_os_last_error();
+            if (err == NET_OS_INTR) {
                 continue;
             }
 
-            _net_log_error();
-            switch (errno) {
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            default:
-                return NET_ERROR;
-            }
+            net_os_log_error();
+            return _net_result_from_os_error(err);
         }
 
-        if (poll_fd.revents & (POLLERR | POLLNVAL)) {
+        if (poll_fd.revents & (NET_POLL_ERR | NET_POLL_NVAL)) {
             return NET_ERROR;
         }
 
@@ -84,29 +75,22 @@ internal Net_Result _net_udp_wait_fd(int   fd,
 // Sends one UDP datagram to the provided destination address.
 //------------------------------------------------------------------------------
 
-Net_Result _net_udp_send_to_addr(int                       fd,
-                                 const struct sockaddr_in* addr,
-                                 const void*               buffer,
-                                 usize                     len)
+Net_Result _net_udp_send_to_addr(Net_Fd          fd,
+                                 const Net_Addr* addr,
+                                 const void*     buffer,
+                                 usize           len)
 {
     Net_Result wait_result =
-        _net_udp_wait_fd(fd, POLLOUT, NET_WAIT_INFINITE, false);
+        _net_udp_wait_fd(fd, NET_POLL_OUT, NET_WAIT_INFINITE, false);
     if (NET_FAILED(wait_result)) {
         return wait_result;
     }
 
-    ssize_t sent =
-        sendto(fd, buffer, len, 0, (const struct sockaddr*)addr, sizeof(*addr));
+    isize sent = net_os_sendto(fd, buffer, len, addr);
     if (sent < 0) {
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case ECONNRESET:
-            return NET_CLOSED;
-        default:
-            return NET_ERROR;
-        }
+        Net_OsError err = net_os_last_error();
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
     return (usize)sent == len ? NET_OK : NET_ERROR;
@@ -121,38 +105,21 @@ Net_Result _net_udp_send_to_addr(int                       fd,
 
 Net_Result _net_udp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
 {
-    int fd = _net_create_socket(endpoint);
-    if (fd < 0) {
-        _net_log_error();
-        switch (errno) {
-        case EMFILE:
-        case ENFILE:
-            return NET_OUT_OF_FD;
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EPROTONOSUPPORT:
-            return NET_PROTOCOL_NOT_SUPPORTED;
-        default:
-            return NET_ERROR;
-        }
+    Net_Fd fd = _net_create_socket(endpoint);
+    if (fd == NET_INVALID_FD) {
+        Net_OsError err = net_os_last_error();
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
-    struct sockaddr_in addr;
-    _net_endpoint_to_addr(endpoint, &addr);
+    Net_Addr addr;
+    net_os_addr_from_endpoint(endpoint, &addr);
 
-    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EACCES:
-            return NET_ACCESS_DENIED;
-        case EADDRINUSE:
-            return NET_PORT_IN_USE;
-        default:
-            return NET_ERROR;
-        }
+    Net_OsError err = net_os_bind(fd, &addr);
+    if (err != NET_OS_OK) {
+        net_os_close(fd);
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
     sock->fd    = fd;
@@ -173,36 +140,21 @@ Net_Result _net_udp_bind(Net_Socket* sock, Net_Endpoint* endpoint)
 
 Net_Result _net_udp_connect(Net_Socket* sock, Net_Endpoint* endpoint)
 {
-    int fd = _net_create_socket(endpoint);
-    if (fd < 0) {
-        _net_log_error();
-        switch (errno) {
-        case EMFILE:
-        case ENFILE:
-            return NET_OUT_OF_FD;
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EPROTONOSUPPORT:
-            return NET_PROTOCOL_NOT_SUPPORTED;
-        default:
-            return NET_ERROR;
-        }
+    Net_Fd fd = _net_create_socket(endpoint);
+    if (fd == NET_INVALID_FD) {
+        Net_OsError err = net_os_last_error();
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
-    struct sockaddr_in addr;
-    _net_endpoint_to_addr(endpoint, &addr);
+    Net_Addr addr;
+    net_os_addr_from_endpoint(endpoint, &addr);
 
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case EACCES:
-            return NET_ACCESS_DENIED;
-        default:
-            return NET_ERROR;
-        }
+    Net_OsError err = net_os_connect(fd, &addr);
+    if (err != NET_OS_OK) {
+        net_os_close(fd);
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
     sock->fd    = fd;
@@ -224,24 +176,18 @@ Net_Result _net_udp_send(Net_Socket* sock, const void* buffer, usize len)
 {
     Net_Result wait_result =
         _net_udp_wait_fd(sock->fd,
-                         POLLOUT,
+                         NET_POLL_OUT,
                          _net_socket_data(sock)->options.send_timeout_ms,
                          _net_socket_data(sock)->options.nonblocking != 0);
     if (NET_FAILED(wait_result)) {
         return wait_result;
     }
 
-    ssize_t sent = send(sock->fd, buffer, len, 0);
+    isize sent = net_os_send(sock->fd, buffer, len);
     if (sent < 0) {
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        case ECONNRESET:
-            return NET_CLOSED;
-        default:
-            return NET_ERROR;
-        }
+        Net_OsError err = net_os_last_error();
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
 
     return (usize)sent == len ? NET_OK : NET_ERROR;
@@ -258,72 +204,57 @@ Net_Result _net_udp_recv_message(Net_Socket* sock)
 {
     Net_Result wait_result =
         _net_udp_wait_fd(sock->fd,
-                         POLLIN,
+                         NET_POLL_IN,
                          _net_socket_data(sock)->options.recv_timeout_ms,
                          _net_socket_data(sock)->options.nonblocking != 0);
     if (NET_FAILED(wait_result)) {
         return wait_result;
     }
 
-    struct sockaddr_in route_addr;
-    socklen_t          route_addr_len = sizeof(route_addr);
-    ssize_t            packet_len     = recvfrom(sock->fd,
-                                  NULL,
-                                  0,
-                                  MSG_PEEK | MSG_TRUNC,
-                                  (struct sockaddr*)&route_addr,
-                                  &route_addr_len);
-    if (packet_len < 0) {
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        default:
-            return NET_ERROR;
-        }
+    usize packet_len = 0;
+    Net_OsError available_err = net_os_available_bytes(sock->fd, &packet_len);
+    if (available_err != NET_OS_OK) {
+        net_os_log_error();
+        return _net_result_from_os_error(available_err);
     }
 
-    usize max_message_size = _net_socket_data(sock)->max_message_size;
-    if ((usize)packet_len > max_message_size) {
+    Net_Addr route_addr;
+    usize    max_message_size = _net_socket_data(sock)->max_message_size;
+    if (packet_len > max_message_size) {
         // Receiving with a short buffer discards the rest of the datagram.
         u8 discard = 0;
-        recv(sock->fd, &discard, sizeof(discard), 0);
+        (void)net_os_recvfrom(sock->fd, &discard, sizeof(discard), 0, &route_addr);
         return NET_BAD_MESSAGE;
     }
 
-    Net_Pipe* pipe = _net_pipe_find_or_create_udp(sock, &route_addr);
-
     if (packet_len == 0) {
-        recvfrom(sock->fd,
-                 NULL,
-                 0,
-                 0,
-                 (struct sockaddr*)&route_addr,
-                 &route_addr_len);
+        u8 discard = 0;
+        isize recv_len =
+            net_os_recvfrom(sock->fd, &discard, sizeof(discard), 0, &route_addr);
+        if (recv_len < 0) {
+            Net_OsError err = net_os_last_error();
+            net_os_log_error();
+            return _net_result_from_os_error(err);
+        }
+
+        Net_Pipe* pipe = _net_pipe_find_or_create_udp(sock, &route_addr);
         _net_socket_store_pending(sock, NULL, 0, pipe);
         return NET_OK;
     }
 
     // UDP preserves message boundaries, so one receive gives us exactly one
     // complete message to retain for the public receive API.
-    void* packet_buffer =
-        mem_realloc(NULL, (usize)packet_len, __FILE__, __LINE__);
-    ssize_t recv_len = recvfrom(sock->fd,
-                                packet_buffer,
-                                (usize)packet_len,
-                                0,
-                                (struct sockaddr*)&route_addr,
-                                &route_addr_len);
+    void* packet_buffer = mem_realloc(NULL, packet_len, __FILE__, __LINE__);
+    isize recv_len =
+        net_os_recvfrom(sock->fd, packet_buffer, packet_len, 0, &route_addr);
     if (recv_len < 0) {
+        Net_OsError err = net_os_last_error();
         mem_free(packet_buffer, __FILE__, __LINE__);
-        _net_log_error();
-        switch (errno) {
-        case ENETDOWN:
-            return NET_NO_NETWORK;
-        default:
-            return NET_ERROR;
-        }
+        net_os_log_error();
+        return _net_result_from_os_error(err);
     }
+
+    Net_Pipe* pipe = _net_pipe_find_or_create_udp(sock, &route_addr);
 
     _net_socket_store_pending(sock, packet_buffer, (usize)recv_len, pipe);
     mem_free(packet_buffer, __FILE__, __LINE__);

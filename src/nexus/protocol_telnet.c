@@ -6,10 +6,6 @@
 
 #include <nexus/internal.h>
 
-#include <errno.h>
-#include <poll.h>
-#include <sys/socket.h>
-
 #define NET_TELNET_IAC 255u
 #define NET_TELNET_DONT 254u
 #define NET_TELNET_DO 253u
@@ -159,7 +155,7 @@ _net_telnet_negotiation_is_expected(Net_Socket* sock, u8 command, u8 option)
 }
 
 internal Net_Result _net_telnet_send_negotiation_response(Net_Socket* sock,
-                                                          int         fd,
+                                                          Net_Fd      fd,
                                                           u8          command,
                                                           u8          option)
 {
@@ -194,7 +190,7 @@ internal Net_Result _net_telnet_send_negotiation_response(Net_Socket* sock,
 // Requests the telnet options Nexus currently cares about for this session.
 //------------------------------------------------------------------------------
 
-Net_Result _net_telnet_request_session_state(Net_Socket* sock, int fd)
+Net_Result _net_telnet_request_session_state(Net_Socket* sock, Net_Fd fd)
 {
     bool      nonblocking = _net_socket_nonblocking(sock);
     TimePoint deadline =
@@ -238,7 +234,7 @@ Net_Result _net_telnet_request_session_state(Net_Socket* sock, int fd)
 }
 
 internal Net_Result _net_telnet_state_extract_message(Net_Socket*      sock,
-                                                      int              fd,
+                                                      Net_Fd           fd,
                                                       Net_TelnetState* state,
                                                       bool* out_ready)
 {
@@ -357,11 +353,11 @@ done:
 //------------------------------------------------------------------------------
 // _net_tcp_send_text_fd
 //
-// Sends one telnet message via the provided file descriptor.
+// Sends one telnet message via the provided socket handle.
 //------------------------------------------------------------------------------
 
 Net_Result
-_net_tcp_send_text_fd(Net_Socket* sock, int fd, const void* buffer, usize len)
+_net_tcp_send_text_fd(Net_Socket* sock, Net_Fd fd, const void* buffer, usize len)
 {
     if (len > _net_socket_data(sock)->max_message_size) {
         return NET_BAD_MESSAGE;
@@ -406,7 +402,7 @@ internal void _net_telnet_store_pending(Net_Socket*      sock,
 }
 
 internal Net_Result _net_tcp_recv_telnet_message_from_fd(Net_Socket*      sock,
-                                                         int              fd,
+                                                         Net_Fd           fd,
                                                          Net_Pipe*        pipe,
                                                          Net_TelnetState* state,
                                                          TimePoint deadline)
@@ -427,30 +423,27 @@ internal Net_Result _net_tcp_recv_telnet_message_from_fd(Net_Socket*      sock,
     u8   recv_buffer[1024];
 
     while (true) {
-        result = _net_poll_fd(fd, POLLIN, deadline, nonblocking);
+        result = _net_poll_fd(fd, NET_POLL_IN, deadline, nonblocking);
         if (NET_FAILED(result)) {
             return result;
         }
 
-        ssize_t recv_result = recv(fd, recv_buffer, sizeof(recv_buffer), 0);
+        isize recv_result = net_os_recv(fd, recv_buffer, sizeof(recv_buffer), 0);
         if (recv_result < 0) {
-            if (errno == EINTR) {
+            Net_OsError err = net_os_last_error();
+            if (err == NET_OS_INTR) {
                 continue;
             }
 
-            switch (errno) {
-            case EAGAIN:
-#if EWOULDBLOCK != EAGAIN
-            case EWOULDBLOCK:
-#endif
+            switch (err) {
+            case NET_OS_WOULD_BLOCK:
                 return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
-            case ENETDOWN:
-                return NET_NO_NETWORK;
-            case ECONNRESET:
+            case NET_OS_CONN_RESET:
+            case NET_OS_CLOSED:
                 return NET_CLOSED;
             default:
-                _net_log_error();
-                return NET_ERROR;
+                net_os_log_error();
+                return _net_result_from_os_error(err);
             }
         }
 

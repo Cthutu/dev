@@ -90,9 +90,16 @@ typedef enum : u8 {
     NET_TELNET_CHARACTER_MODE,
 } Net_Telnet_Mode;
 
+// Platform-neutral socket handle. Sized to hold `int` on POSIX and `SOCKET`
+// (`uintptr_t`) on Windows. `NET_INVALID_FD` or any negative value is the
+// "no live handle" sentinel.
+typedef intptr_t Net_Fd;
+
+#define NET_INVALID_FD ((Net_Fd)-1)
+
 typedef struct {
     Net_State       state; // Current connection/listener lifecycle state
-    int             fd;    // Live OS socket handle, or -1 when unused
+    Net_Fd          fd;    // Live OS socket handle, or NET_INVALID_FD when unused
     Net_Protocol    proto; // Active transport selected by bind/connect
     Net_Socket_Kind kind;  // Public socket behaviour kind
 

@@ -17,7 +17,6 @@ int run(int argc, char** argv);
 #ifndef TEST
 int main(int argc, char** argv)
 {
-    mutex_init(&g_kore_output_mutex);
     temp_arena_init();
 
 #    if OS_WINDOWS
@@ -38,7 +37,6 @@ int main(int argc, char** argv)
     mem_print_leaks();
 #    endif // CONFIG_DEBUG
     temp_arena_done();
-    mutex_done(&g_kore_output_mutex);
     return result;
 }
 #endif

@@ -6,39 +6,35 @@
 
 #include <nexus/internal.h>
 
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-void _net_tcp_close_telnet_fd(int fd)
+void _net_tcp_close_telnet_fd(Net_Fd fd)
 {
-    if (fd < 0) {
+    if (fd == NET_INVALID_FD) {
         return;
     }
 
-    shutdown(fd, SHUT_WR);
+    net_os_shutdown_send(fd);
 
-    u8            buffer[256];
-    struct pollfd poll_fd = {
+    u8         buffer[256];
+    Net_PollFd poll_fd = {
         .fd     = fd,
-        .events = POLLIN,
+        .events = NET_POLL_IN,
     };
 
-    while (poll(&poll_fd, 1, 50) > 0) {
-        if (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+    while (net_os_poll(&poll_fd, 1, 50) > 0) {
+        if (poll_fd.revents & (NET_POLL_ERR | NET_POLL_HUP | NET_POLL_NVAL)) {
             break;
         }
-        if (!(poll_fd.revents & POLLIN)) {
+        if (!(poll_fd.revents & NET_POLL_IN)) {
             break;
         }
 
-        ssize_t recv_len = recv(fd, buffer, sizeof(buffer), 0);
+        isize recv_len = net_os_recv(fd, buffer, sizeof(buffer), 0);
         if (recv_len <= 0) {
             break;
         }
     }
 
-    close(fd);
+    net_os_close(fd);
 }
 
 //------------------------------------------------------------------------------
@@ -70,7 +66,7 @@ internal Net_Pipe* _net_pipe_alloc(Net_Socket* sock, Net_Pipe_Kind kind)
 // Creates a TCP pipe record for one accepted client connection.
 //------------------------------------------------------------------------------
 
-Net_Pipe* _net_pipe_create_tcp(Net_Socket* sock, int fd)
+Net_Pipe* _net_pipe_create_tcp(Net_Socket* sock, Net_Fd fd)
 {
     Net_Pipe* pipe = _net_pipe_alloc(sock, NET_PIPE_TCP);
     pipe->tcp.fd   = fd;
@@ -87,8 +83,8 @@ Net_Pipe* _net_pipe_create_tcp(Net_Socket* sock, int fd)
 // exists, otherwise creates a new one.
 //------------------------------------------------------------------------------
 
-Net_Pipe* _net_pipe_find_or_create_udp(Net_Socket*               sock,
-                                       const struct sockaddr_in* addr)
+Net_Pipe* _net_pipe_find_or_create_udp(Net_Socket*     sock,
+                                       const Net_Addr* addr)
 {
     Net_SocketData* data = _net_socket_data_ensure(sock);
     for (usize i = 0; i < array_count(data->pipes); ++i) {
@@ -97,9 +93,7 @@ Net_Pipe* _net_pipe_find_or_create_udp(Net_Socket*               sock,
             continue;
         }
 
-        if (pipe->udp.addr.sin_family == addr->sin_family &&
-            pipe->udp.addr.sin_port == addr->sin_port &&
-            pipe->udp.addr.sin_addr.s_addr == addr->sin_addr.s_addr) {
+        if (net_os_addr_equal(&pipe->udp.addr, addr)) {
             return pipe;
         }
     }
@@ -122,13 +116,13 @@ void _net_pipe_close(Net_Pipe* pipe)
         return;
     }
 
-    if (pipe->kind == NET_PIPE_TCP && pipe->tcp.fd >= 0) {
+    if (pipe->kind == NET_PIPE_TCP && pipe->tcp.fd != NET_INVALID_FD) {
         if (pipe->owner->kind == NET_SOCKET_TELNET) {
             _net_tcp_close_telnet_fd(pipe->tcp.fd);
         } else {
-            close(pipe->tcp.fd);
+            net_os_close(pipe->tcp.fd);
         }
-        pipe->tcp.fd = -1;
+        pipe->tcp.fd = NET_INVALID_FD;
         _net_telnet_state_done(&pipe->tcp.telnet);
     }
 
