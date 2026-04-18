@@ -136,23 +136,23 @@ internal void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
         window,
         2,
         2,
-        "Layered \033[38;2;120;220;255mpanels\033[0m, "
+        "Layered \033[38;2;120;220;255mpanels\033[0m \033[38;5;117m◆◆\033[0m, "
         "\033[38;5;221mdirect cell painting\033[0m, and clipping.");
     term_window_write_cstr(
         window,
         2,
         3,
-        "Press \033[38;5;154mq\033[0m to quit. "
+        "Press \033[38;5;154m[q]\033[0m to quit. "
         "\033[38;5;81mANSI resets\033[39m preserve the panel colours.");
 
-    term_window_write_cstr(window, 2, 5, "\033[38;5;215mTerminal\033[0m");
+    term_window_write_cstr(window, 2, 5, "\033[38;5;215mTerminal ◌\033[0m");
     term_window_format(
         window, 12, 5, "\033[38;5;230m%ux%u\033[0m", size.width, size.height);
 
-    term_window_write_cstr(window, 2, 6, "\033[38;5;215mFrame\033[0m");
+    term_window_write_cstr(window, 2, 6, "\033[38;5;215mFrame ↻\033[0m");
     term_window_format(window, 12, 6, "\033[38;5;117m%u\033[0m", frame);
 
-    term_window_write_cstr(window, 2, 8, "\033[38;5;118mCPU\033[0m");
+    term_window_write_cstr(window, 2, 8, "\033[38;5;118mCPU ▲\033[0m");
     demo_window_bar(
         window,
         12,
@@ -163,7 +163,7 @@ internal void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
         term_rgb(120, 255, 180),
         paper);
 
-    term_window_write_cstr(window, 2, 9, "\033[38;5;203mGPU\033[0m");
+    term_window_write_cstr(window, 2, 9, "\033[38;5;203mGPU ■\033[0m");
     demo_window_bar(
         window,
         12,
@@ -174,7 +174,7 @@ internal void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
         term_rgb(255, 120, 120),
         paper);
 
-    term_window_write_cstr(window, 2, 11, "\033[38;5;111mSignal\033[0m");
+    term_window_write_cstr(window, 2, 11, "\033[38;5;111mSignal ◇\033[0m");
     if (window->rect.width > 16 && window->rect.height > 13) {
         int plot_width  = window->rect.width - 16;
         int plot_height = demo_min_u16(6, window->rect.height - 13);
@@ -236,8 +236,8 @@ internal void demo_draw_probe_panel(TermWindow* window, u32 frame)
         window,
         2,
         1,
-        "\033[38;5;159mSweep\033[0m "
-        "\033[38;5;223mthrough clip bounds\033[0m");
+        "\033[38;5;159mSweep ◎\033[0m "
+        "\033[38;5;223mthrough clip bounds ↔↕\033[0m");
 }
 
 internal void demo_draw_ticker_panel(TermWindow* window, u32 frame)
@@ -245,7 +245,8 @@ internal void demo_draw_ticker_panel(TermWindow* window, u32 frame)
     static const char* msg   = " demo-window.c  |  overlapping windows  |  "
                                "\033[38;5;216manimated clipping\033[0m  |  "
                                "\033[38;5;159mANSI window text\033[0m  |  "
-                               "\033[38;5;118mreset returns to feed colours\033[0m  |  ";
+                               "\033[38;5;118mreset returns to feed colours\033[0m  |  "
+                               "\033[38;5;229m◆ glyphs ◇ arrows ↻ ◎\033[0m  |  ";
     u32                paper = term_rgb(42, 20, 8);
     u32                ink   = term_rgb(255, 218, 130);
     u32                edge  = term_rgb(255, 150, 70);
