@@ -28,5 +28,7 @@ extern Arena    g_term_arena;
 
 enum { TERM_FB_CHAR_WIDE_TAIL = 0xFFFFFFFFu };
 
+void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width);
+
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------

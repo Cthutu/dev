@@ -8,6 +8,207 @@
 #include <term/term.h>
 
 //------------------------------------------------------------------------------
+// _term_ansi_palette
+//
+// Map a basic ANSI colour index onto the terminal colour constants used by the
+// framebuffer and window code.
+//------------------------------------------------------------------------------
+
+internal u32 _term_ansi_palette(int index)
+{
+    static const u32 palette[16] = {
+        COLOUR_BLACK,          COLOUR_RED,         COLOUR_GREEN,
+        COLOUR_YELLOW,         COLOUR_BLUE,        COLOUR_MAGENTA,
+        COLOUR_CYAN,           COLOUR_BRIGHT_GREY, COLOUR_GREY,
+        COLOUR_BRIGHT_RED,     COLOUR_BRIGHT_GREEN, COLOUR_BRIGHT_YELLOW,
+        COLOUR_BRIGHT_BLUE,    COLOUR_BRIGHT_MAGENTA,
+        COLOUR_BRIGHT_CYAN,    COLOUR_WHITE,
+    };
+
+    if (index < 0) {
+        index = 0;
+    } else if (index > 15) {
+        index = 15;
+    }
+    return palette[index];
+}
+
+//------------------------------------------------------------------------------
+// _term_ansi_256_colour
+//
+// Convert an ANSI 256-colour palette index into an RGB value.
+//------------------------------------------------------------------------------
+
+internal u32 _term_ansi_256_colour(int index)
+{
+    static const u8 cube_levels[6] = {0, 95, 135, 175, 215, 255};
+
+    if (index < 0) {
+        index = 0;
+    }
+
+    if (index < 16) {
+        return _term_ansi_palette(index);
+    }
+
+    if (index < 232) {
+        int base = index - 16;
+        int r    = base / 36;
+        int g    = (base / 6) % 6;
+        int b    = base % 6;
+        return term_rgb(cube_levels[r], cube_levels[g], cube_levels[b]);
+    }
+
+    if (index > 255) {
+        index = 255;
+    }
+
+    u8 grey = (u8)(8 + ((index - 232) * 10));
+    return term_rgb(grey, grey, grey);
+}
+
+//------------------------------------------------------------------------------
+// _term_window_apply_sgr
+//
+// Apply a parsed ANSI SGR sequence to the current window write colours. Reset
+// operations restore the colours that were already present in the window cells
+// before the write began.
+//------------------------------------------------------------------------------
+
+internal void _term_window_apply_sgr(int         params[],
+                                     int         count,
+                                     u32         base_ink,
+                                     u32         base_paper,
+                                     u32*        io_ink,
+                                     u32*        io_paper)
+{
+    if (count == 0) {
+        *io_ink   = base_ink;
+        *io_paper = base_paper;
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        int code = params[i];
+
+        if (code == 0) {
+            *io_ink   = base_ink;
+            *io_paper = base_paper;
+            continue;
+        }
+
+        if (code >= 30 && code <= 37) {
+            *io_ink = _term_ansi_palette(code - 30);
+            continue;
+        }
+
+        if (code >= 90 && code <= 97) {
+            *io_ink = _term_ansi_palette((code - 90) + 8);
+            continue;
+        }
+
+        if (code >= 40 && code <= 47) {
+            *io_paper = _term_ansi_palette(code - 40);
+            continue;
+        }
+
+        if (code >= 100 && code <= 107) {
+            *io_paper = _term_ansi_palette((code - 100) + 8);
+            continue;
+        }
+
+        if (code == 39) {
+            *io_ink = base_ink;
+            continue;
+        }
+
+        if (code == 49) {
+            *io_paper = base_paper;
+            continue;
+        }
+
+        if ((code == 38 || code == 48) && i + 1 < count) {
+            u32* target = code == 38 ? io_ink : io_paper;
+            int  mode   = params[++i];
+
+            if (mode == 5 && i + 1 < count) {
+                *target = _term_ansi_256_colour(params[++i]);
+                continue;
+            }
+
+            if (mode == 2 && i + 3 < count) {
+                int r = CLAMP(params[++i], 0, 255);
+                int g = CLAMP(params[++i], 0, 255);
+                int b = CLAMP(params[++i], 0, 255);
+                *target = term_rgb((u8)r, (u8)g, (u8)b);
+                continue;
+            }
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// _term_window_try_parse_sgr
+//
+// Parse an ANSI SGR escape sequence beginning at the current byte position.
+// Returns the number of bytes consumed when a valid sequence is found, or 0 if
+// the current bytes are not a complete SGR sequence.
+//------------------------------------------------------------------------------
+
+internal usize _term_window_try_parse_sgr(const u8* s,
+                                          const u8* end,
+                                          u32       base_ink,
+                                          u32       base_paper,
+                                          u32*      io_ink,
+                                          u32*      io_paper)
+{
+    int  params[16];
+    int  count      = 0;
+    int  current    = 0;
+    bool have_digit = false;
+    const u8* p     = s;
+
+    if ((usize)(end - s) < 2 || p[0] != '\033' || p[1] != '[') {
+        return 0;
+    }
+    p += 2;
+
+    while (p < end) {
+        u8 ch = *p;
+
+        if (ch >= '0' && ch <= '9') {
+            current    = current * 10 + (int)(ch - '0');
+            have_digit = true;
+            p++;
+            continue;
+        }
+
+        if (ch == ';') {
+            if (count < ARRAY_COUNT(params)) {
+                params[count++] = have_digit ? current : 0;
+            }
+            current    = 0;
+            have_digit = false;
+            p++;
+            continue;
+        }
+
+        if (ch == 'm') {
+            if (count < ARRAY_COUNT(params)) {
+                params[count++] = have_digit ? current : 0;
+            }
+            _term_window_apply_sgr(
+                params, count, base_ink, base_paper, io_ink, io_paper);
+            return (usize)((p + 1) - s);
+        }
+
+        return 0;
+    }
+
+    return 0;
+}
+
+//------------------------------------------------------------------------------
 // term_window_init
 //
 // Initialise a TermWindow with the given rectangle. The window's cells will be
@@ -227,18 +428,85 @@ void term_window_9slice(const TermWindow* window,
 
 void term_window_write(TermWindow* window, int x, int y, string str)
 {
+    const int width = (int)window->rect.width;
+
     if (y < 0 || y >= (int)window->rect.height) {
         return;
     }
-
-    int start_x = MAX(x, 0);
-    int end_x   = MIN(x + (int)str.count, (int)window->rect.width);
-    if (end_x <= start_x) {
+    if (width <= 0) {
         return;
     }
 
-    for (int i = start_x; i < end_x; i++) {
-        window->cells[y * window->rect.width + i].ch = str.data[i - x];
+    int base_x = CLAMP(x, 0, width - 1);
+    u32 base_ink =
+        window->cells[(usize)y * window->rect.width + (usize)base_x].ink;
+    u32 base_paper =
+        window->cells[(usize)y * window->rect.width + (usize)base_x].paper;
+    u32 current_ink   = base_ink;
+    u32 current_paper = base_paper;
+    int cx            = x;
+    const u8* s       = str.data;
+    const u8* end     = str.data + str.count;
+
+    while (s < end) {
+        usize sgr_bytes = _term_window_try_parse_sgr(
+            s, end, base_ink, base_paper, &current_ink, &current_paper);
+        if (sgr_bytes != 0) {
+            s += sgr_bytes;
+            continue;
+        }
+
+        cstr  cursor = (cstr)s;
+        u32   ch;
+        usize bytes;
+        usize glyph_width;
+        term_utf8_next(&cursor, &ch, &bytes, &glyph_width);
+        UNUSED(bytes);
+        s = (const u8*)cursor;
+
+        if (ch == '\n') {
+            break;
+        }
+
+        if (glyph_width == 0) {
+            glyph_width = 1;
+        }
+        if (glyph_width > (usize)width) {
+            cx += (int)glyph_width;
+            continue;
+        }
+
+        if (cx + (int)glyph_width <= 0) {
+            cx += (int)glyph_width;
+            continue;
+        }
+
+        if (cx >= width) {
+            break;
+        }
+
+        if (cx < 0) {
+            cx += (int)glyph_width;
+            continue;
+        }
+        if (cx + (int)glyph_width > width) {
+            break;
+        }
+
+        usize index              = (usize)y * window->rect.width + (usize)cx;
+        window->cells[index].ch  = ch;
+        window->cells[index].ink = current_ink;
+        window->cells[index].paper = current_paper;
+
+        for (usize cell = 1; cell < glyph_width && cx + (int)cell < width;
+             ++cell) {
+            TermCell* tail = &window->cells[index + cell];
+            tail->ch       = TERM_FB_CHAR_WIDE_TAIL;
+            tail->ink      = current_ink;
+            tail->paper    = current_paper;
+        }
+
+        cx += (int)glyph_width;
     }
 }
 

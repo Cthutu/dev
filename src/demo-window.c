@@ -15,11 +15,11 @@ typedef struct {
     TermWindow ticker_panel;
 } DemoWindowState;
 
-static u16 demo_min_u16(u16 a, u16 b) { return a < b ? a : b; }
+internal u16 demo_min_u16(u16 a, u16 b) { return a < b ? a : b; }
 
-static u16 demo_max_u16(u16 a, u16 b) { return a > b ? a : b; }
+internal u16 demo_max_u16(u16 a, u16 b) { return a > b ? a : b; }
 
-static u16 demo_ping_pong(u32 tick, u16 span)
+internal u16 demo_ping_pong(u32 tick, u16 span)
 {
     if (span == 0) {
         return 0;
@@ -30,7 +30,7 @@ static u16 demo_ping_pong(u32 tick, u16 span)
     return pos < span ? (u16)pos : (u16)(period - pos);
 }
 
-static i32 demo_signed_ping_pong(u32 tick, i32 span)
+internal i32 demo_signed_ping_pong(u32 tick, i32 span)
 {
     if (span <= 0) {
         return 0;
@@ -40,7 +40,7 @@ static i32 demo_signed_ping_pong(u32 tick, i32 span)
     return (i32)pos;
 }
 
-static void
+internal void
 demo_window_put(TermWindow* window, int x, int y, u32 ch, u32 ink, u32 paper)
 {
     if (x < 0 || y < 0 || x >= window->rect.width || y >= window->rect.height) {
@@ -54,7 +54,7 @@ demo_window_put(TermWindow* window, int x, int y, u32 ch, u32 ink, u32 paper)
     cell->paper     = paper;
 }
 
-static void demo_window_box(
+internal void demo_window_box(
     TermWindow* window, u32 ink, u32 paper, u32 border_ink, cstr title)
 {
     term_window_paint_rect(
@@ -77,14 +77,14 @@ static void demo_window_box(
     }
 }
 
-static void demo_window_bar(TermWindow* window,
-                            int         x,
-                            int         y,
-                            int         width,
-                            u32         value,
-                            u32         max_value,
-                            u32         ink,
-                            u32         paper)
+internal void demo_window_bar(TermWindow* window,
+                              int         x,
+                              int         y,
+                              int         width,
+                              u32         value,
+                              u32         max_value,
+                              u32         ink,
+                              u32         paper)
 {
     if (width <= 0) {
         return;
@@ -102,7 +102,7 @@ static void demo_window_bar(TermWindow* window,
     }
 }
 
-static void demo_draw_backdrop(TermWindow* window, u32 frame)
+internal void demo_draw_backdrop(TermWindow* window, u32 frame)
 {
     static const char ramp[] = " .:-=+*#%@";
     u16               width  = window->rect.width;
@@ -124,7 +124,7 @@ static void demo_draw_backdrop(TermWindow* window, u32 frame)
     }
 }
 
-static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
+internal void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
 {
     u32 paper = term_rgb(20, 24, 32);
     u32 ink   = term_rgb(236, 223, 204);
@@ -133,16 +133,26 @@ static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
     demo_window_box(window, ink, paper, edge, " TERM WINDOW CONTROL ");
 
     term_window_write_cstr(
-        window, 2, 2, "Layered panels, direct cell painting, and clipping.");
-    term_window_write_cstr(window, 2, 3, "Press q to quit.");
+        window,
+        2,
+        2,
+        "Layered \033[38;2;120;220;255mpanels\033[0m, "
+        "\033[38;5;221mdirect cell painting\033[0m, and clipping.");
+    term_window_write_cstr(
+        window,
+        2,
+        3,
+        "Press \033[38;5;154mq\033[0m to quit. "
+        "\033[38;5;81mANSI resets\033[39m preserve the panel colours.");
 
-    term_window_write_cstr(window, 2, 5, "Terminal");
-    term_window_format(window, 12, 5, "%ux%u", size.width, size.height);
+    term_window_write_cstr(window, 2, 5, "\033[38;5;215mTerminal\033[0m");
+    term_window_format(
+        window, 12, 5, "\033[38;5;230m%ux%u\033[0m", size.width, size.height);
 
-    term_window_write_cstr(window, 2, 6, "Frame");
-    term_window_format(window, 12, 6, "%u", frame);
+    term_window_write_cstr(window, 2, 6, "\033[38;5;215mFrame\033[0m");
+    term_window_format(window, 12, 6, "\033[38;5;117m%u\033[0m", frame);
 
-    term_window_write_cstr(window, 2, 8, "CPU");
+    term_window_write_cstr(window, 2, 8, "\033[38;5;118mCPU\033[0m");
     demo_window_bar(
         window,
         12,
@@ -153,7 +163,7 @@ static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
         term_rgb(120, 255, 180),
         paper);
 
-    term_window_write_cstr(window, 2, 9, "GPU");
+    term_window_write_cstr(window, 2, 9, "\033[38;5;203mGPU\033[0m");
     demo_window_bar(
         window,
         12,
@@ -164,7 +174,7 @@ static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
         term_rgb(255, 120, 120),
         paper);
 
-    term_window_write_cstr(window, 2, 11, "Signal");
+    term_window_write_cstr(window, 2, 11, "\033[38;5;111mSignal\033[0m");
     if (window->rect.width > 16 && window->rect.height > 13) {
         int plot_width  = window->rect.width - 16;
         int plot_height = demo_min_u16(6, window->rect.height - 13);
@@ -183,7 +193,7 @@ static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
     }
 }
 
-static void demo_draw_probe_panel(TermWindow* window, u32 frame)
+internal void demo_draw_probe_panel(TermWindow* window, u32 frame)
 {
     u32 paper = term_rgb(14, 44, 34);
     u32 ink   = term_rgb(140, 255, 210);
@@ -221,28 +231,37 @@ static void demo_draw_probe_panel(TermWindow* window, u32 frame)
                         term_rgb(255, 250, 170),
                         term_rgb(100, 40, 20));
     }
+
+    term_window_write_cstr(
+        window,
+        2,
+        1,
+        "\033[38;5;159mSweep\033[0m "
+        "\033[38;5;223mthrough clip bounds\033[0m");
 }
 
-static void demo_draw_ticker_panel(TermWindow* window, u32 frame)
+internal void demo_draw_ticker_panel(TermWindow* window, u32 frame)
 {
     static const char* msg   = " demo-window.c  |  overlapping windows  |  "
-                               "animated clipping  |  direct framebuffer path ";
+                               "\033[38;5;216manimated clipping\033[0m  |  "
+                               "\033[38;5;159mANSI window text\033[0m  |  "
+                               "\033[38;5;118mreset returns to feed colours\033[0m  |  ";
     u32                paper = term_rgb(42, 20, 8);
     u32                ink   = term_rgb(255, 218, 130);
     u32                edge  = term_rgb(255, 150, 70);
 
     demo_window_box(window, ink, paper, edge, " FEED ");
 
-    int msg_len = (int)strlen(msg);
-    int span    = msg_len + demo_max_u16(1, window->rect.width - 2);
+    int msg_width = (int)string_character_count(string_from_cstr(msg));
+    int span      = msg_width + demo_max_u16(1, window->rect.width - 2);
     int offset  = (int)(frame % (u32)span);
     int start_x = 1 - offset;
 
     term_window_write_cstr(window, start_x, 1, msg);
-    term_window_write_cstr(window, start_x + msg_len, 1, msg);
+    term_window_write_cstr(window, start_x + msg_width, 1, msg);
 }
 
-static void demo_render(DemoWindowState* state, u32 frame)
+internal void demo_render(DemoWindowState* state, u32 frame)
 {
     TermSize size = term_size_get();
     if (size.width < 36 || size.height < 14) {
