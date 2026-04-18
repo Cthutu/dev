@@ -18,10 +18,10 @@ void _term_fb_resize(u16 width, u16 height)
 
     if (num_elements > current_num_elements) {
         // Need to allocate more memory
-        array_reserve(g_term_fb_chars, num_elements);
-        array_reserve(g_term_fb_ink, num_elements);
-        array_reserve(g_term_fb_paper, num_elements);
-        array_reserve(g_term_fb_dirty, num_elements);
+        array_requires_size(g_term_fb_chars, num_elements);
+        array_requires_size(g_term_fb_ink, num_elements);
+        array_requires_size(g_term_fb_paper, num_elements);
+        array_requires_size(g_term_fb_dirty, num_elements);
     }
 
     // If the width or height as reduced, we need to truncate by repositioning

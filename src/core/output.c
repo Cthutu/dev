@@ -16,8 +16,8 @@ Mutex g_kore_output_mutex;
 global_variable INIT_ONCE g_kore_output_mutex_once = INIT_ONCE_STATIC_INIT;
 
 internal BOOL CALLBACK _kore_output_mutex_once_init(PINIT_ONCE init_once,
-                                                    PVOID     parameter,
-                                                    PVOID*    context)
+                                                    PVOID      parameter,
+                                                    PVOID*     context)
 {
     UNUSED(init_once);
     UNUSED(parameter);
@@ -28,10 +28,8 @@ internal BOOL CALLBACK _kore_output_mutex_once_init(PINIT_ONCE init_once,
 
 internal void _kore_output_mutex_ensure_init(void)
 {
-    InitOnceExecuteOnce(&g_kore_output_mutex_once,
-                        _kore_output_mutex_once_init,
-                        NULL,
-                        NULL);
+    InitOnceExecuteOnce(
+        &g_kore_output_mutex_once, _kore_output_mutex_once_init, NULL, NULL);
 }
 #else
 global_variable pthread_once_t g_kore_output_mutex_once = PTHREAD_ONCE_INIT;
@@ -60,7 +58,7 @@ internal cstr _format_output(cstr format, va_list args, usize* out_size)
     va_end(args_copy);
 
     // Allocate or reallocate the print buffer if necessary.
-    array_requires(print_buffer, *out_size + 1);
+    array_requires_capacity(print_buffer, *out_size + 1);
     array_leak(print_buffer); // Prevent detection in leaks
 
     // Format the string into the buffer.

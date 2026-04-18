@@ -46,7 +46,7 @@ TEST_CASE(array, delete_clear_and_reserve)
     array_clear(arr);
     TEST_ASSERT_EQ(array_count(arr), 0);
 
-    array_reserve(arr, 5);
+    array_requires_size(arr, 5);
     TEST_ASSERT_EQ(array_count(arr), 5);
     TEST_ASSERT_GE(array_capacity(arr), 5);
 
