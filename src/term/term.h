@@ -171,7 +171,67 @@ void term_window_draw(const TermWindow* window);
 
 //------------------------------------------------------------------------------
 // Terminal console
+//
+// A console contains two sections, the output area (which can have multiple
+// rows of text offscreen), and an input area directly below it, that can have
+// an optional prompt.
+//
+// As new output is sent to the console, it pushes the input area downwards
+// until it reaches the bottom of the console area (which is the same size as
+// the TermWindow used to render it).  If the input cannot move further down
+// then the output scrolls upwards to make room for new lines.  At this point,
+// the mousewheel events are used to scroll the output area.
+//
+// If the output area is scrolled, any new output does not automatically scroll
+// the console as the user is now in control.  When the user scrolls back to the
+// last output, automatic scrolling is resumed.
+//
+// When `term_console_send_event` is called, it is assumed that this console has
+// the focus and the terminal cursor will be placed and shown.  Calling this on
+// any other console will move the cursor there.  Manual removal of focus can
+// happen with `term_console_unfocus`.
+//
+// ANSI colour codes can be used in the write/format functions.  Newlines are
+// supported.  The wrap version of the functions will output a long string over
+// multiple lines.
+//
+// `term_console_resize` will call `term_window_resize` underneath and force
+// a redraw and update of the input.
+//
+// Poll the input using `term_console_get_input` and if the user pressed
+// ENTER to accept the input, this will return true and the string returned.
 //------------------------------------------------------------------------------
+
+// TODO: Read the documentation just above and implement the following functions
+// not forgetting to implement the TermConsole too.  The implementation should
+// go in console.c and there should be unit tests, a demo that create a console
+// that matches the terminal size (and react to a resize), outputs messages
+// every 5 seconds and echos any input that is received.  Also, how-to guides
+// must be created too.
+
+void term_console_init(TermConsole* console,
+                       TermWindow*  window,
+                       u32          default_ink,
+                       u32          default_paper,
+                       u32          history_size);
+void term_console_done(TermConsole* console);
+void term_console_enable_input(TermConsole* console, bool enable);
+void term_console_set_prompt(TermConsole* console, string prompt);
+void term_console_resize(TermConsole* console, TermRect new_rect);
+
+void term_console_clear(TermConsole* console);
+void term_console_write(TermConsole* console, string str);
+void term_console_write_cstr(TermConsole* console, cstr string);
+void term_console_write_wrap(TermConsole* console, string str);
+void term_console_formatv(TermConsole* console, cstr fmt, va_list args);
+void term_console_format(TermConsole* console, cstr fmt, ...);
+void term_console_formatv_wrap(TermConsole* console, cstr fmt, va_list args);
+void term_console_format_wrap(TermConsole* console, cstr fmt, ...);
+
+void term_console_send_event(TermConsole* console, TermEvent event);
+void term_console_unfocus(TermConsole* console);
+
+bool term_console_get_input(TermConsole* console, string* out_input);
 
 //------------------------------------------------------------------------------
 // Terminal information dumping
