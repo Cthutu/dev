@@ -17,12 +17,22 @@
 internal u32 _term_ansi_palette(int index)
 {
     static const u32 palette[16] = {
-        COLOUR_BLACK,          COLOUR_RED,         COLOUR_GREEN,
-        COLOUR_YELLOW,         COLOUR_BLUE,        COLOUR_MAGENTA,
-        COLOUR_CYAN,           COLOUR_BRIGHT_GREY, COLOUR_GREY,
-        COLOUR_BRIGHT_RED,     COLOUR_BRIGHT_GREEN, COLOUR_BRIGHT_YELLOW,
-        COLOUR_BRIGHT_BLUE,    COLOUR_BRIGHT_MAGENTA,
-        COLOUR_BRIGHT_CYAN,    COLOUR_WHITE,
+        COLOUR_BLACK,
+        COLOUR_RED,
+        COLOUR_GREEN,
+        COLOUR_YELLOW,
+        COLOUR_BLUE,
+        COLOUR_MAGENTA,
+        COLOUR_CYAN,
+        COLOUR_BRIGHT_GREY,
+        COLOUR_GREY,
+        COLOUR_BRIGHT_RED,
+        COLOUR_BRIGHT_GREEN,
+        COLOUR_BRIGHT_YELLOW,
+        COLOUR_BRIGHT_BLUE,
+        COLOUR_BRIGHT_MAGENTA,
+        COLOUR_BRIGHT_CYAN,
+        COLOUR_WHITE,
     };
 
     if (index < 0) {
@@ -75,12 +85,12 @@ internal u32 _term_ansi_256_colour(int index)
 // before the write began.
 //------------------------------------------------------------------------------
 
-internal void _term_window_apply_sgr(int         params[],
-                                     int         count,
-                                     u32         base_ink,
-                                     u32         base_paper,
-                                     u32*        io_ink,
-                                     u32*        io_paper)
+internal void _term_window_apply_sgr(int  params[],
+                                     int  count,
+                                     u32  base_ink,
+                                     u32  base_paper,
+                                     u32* io_ink,
+                                     u32* io_paper)
 {
     if (count == 0) {
         *io_ink   = base_ink;
@@ -137,9 +147,9 @@ internal void _term_window_apply_sgr(int         params[],
             }
 
             if (mode == 2 && i + 3 < count) {
-                int r = CLAMP(params[++i], 0, 255);
-                int g = CLAMP(params[++i], 0, 255);
-                int b = CLAMP(params[++i], 0, 255);
+                int r   = CLAMP(params[++i], 0, 255);
+                int g   = CLAMP(params[++i], 0, 255);
+                int b   = CLAMP(params[++i], 0, 255);
                 *target = term_rgb((u8)r, (u8)g, (u8)b);
                 continue;
             }
@@ -162,11 +172,11 @@ internal usize _term_window_try_parse_sgr(const u8* s,
                                           u32*      io_ink,
                                           u32*      io_paper)
 {
-    int  params[16];
-    int  count      = 0;
-    int  current    = 0;
-    bool have_digit = false;
-    const u8* p     = s;
+    int       params[16];
+    int       count      = 0;
+    int       current    = 0;
+    bool      have_digit = false;
+    const u8* p          = s;
 
     if ((usize)(end - s) < 2 || p[0] != '\033' || p[1] != '[') {
         return 0;
@@ -442,11 +452,11 @@ void term_window_write(TermWindow* window, int x, int y, string str)
         window->cells[(usize)y * window->rect.width + (usize)base_x].ink;
     u32 base_paper =
         window->cells[(usize)y * window->rect.width + (usize)base_x].paper;
-    u32 current_ink   = base_ink;
-    u32 current_paper = base_paper;
-    int cx            = x;
-    const u8* s       = str.data;
-    const u8* end     = str.data + str.count;
+    u32       current_ink   = base_ink;
+    u32       current_paper = base_paper;
+    int       cx            = x;
+    const u8* s             = str.data;
+    const u8* end           = str.data + str.count;
 
     while (s < end) {
         usize sgr_bytes = _term_window_try_parse_sgr(
@@ -493,9 +503,9 @@ void term_window_write(TermWindow* window, int x, int y, string str)
             break;
         }
 
-        usize index              = (usize)y * window->rect.width + (usize)cx;
-        window->cells[index].ch  = ch;
-        window->cells[index].ink = current_ink;
+        usize index                = (usize)y * window->rect.width + (usize)cx;
+        window->cells[index].ch    = ch;
+        window->cells[index].ink   = current_ink;
         window->cells[index].paper = current_paper;
 
         for (usize cell = 1; cell < glyph_width && cx + (int)cell < width;
@@ -601,5 +611,82 @@ void term_window_draw(const TermWindow* window)
 
         src_row_start += src_stride;
         dst_row_start += dst_stride;
+    }
+}
+
+//------------------------------------------------------------------------------
+// term_window_resize
+//
+// Resize the window backbuffer, truncating and removing rows if the width or
+// height reduces, or filling with spaces otherwise.  If row width reduces,
+// the window array contents are copied in such a way that the beginning of
+// each rows remains the same.
+//
+// All backbuffer adjustments are made in place with only expansion of the
+// arrays happening if more cells are required than can be held in capacity.
+//------------------------------------------------------------------------------
+
+void term_window_resize(TermWindow* window, TermRect new_rect)
+{
+    if (new_rect.width == window->rect.width &&
+        new_rect.height == window->rect.height) {
+        window->rect = new_rect;
+        return;
+    }
+
+    u32 old_width        = window->rect.width;
+    u32 old_height       = window->rect.height;
+    u32 new_width        = new_rect.width;
+    u32 new_height       = new_rect.height;
+
+    usize required_cells = (usize)new_width * (usize)new_height;
+    u32   shared_width   = MIN(old_width, new_width);
+    u32   shared_height  = MIN(old_height, new_height);
+
+    array_requires_size(window->cells, required_cells);
+
+    // Reflow the rows in place when the row stride changes. Shrinking moves
+    // rows towards lower indices, so copy top-down. Growing moves rows towards
+    // higher indices, so copy bottom-up.
+    if (new_width < old_width) {
+        for (u32 y = 0; y < shared_height; y++) {
+            usize src_index = (usize)y * old_width;
+            usize dst_index = (usize)y * new_width;
+            memmove(&window->cells[dst_index],
+                    &window->cells[src_index],
+                    sizeof(TermCell) * shared_width);
+        }
+    } else if (new_width > old_width) {
+        for (i32 y = (i32)shared_height - 1; y >= 0; y--) {
+            usize src_index = (usize)y * old_width;
+            usize dst_index = (usize)y * new_width;
+            memmove(&window->cells[dst_index],
+                    &window->cells[src_index],
+                    sizeof(TermCell) * shared_width);
+        }
+    }
+
+    // Update the window rect before filling to ensure the correct clipping
+    // happens when clearing any new areas.
+    window->rect = new_rect;
+
+    // Clear any new areas with spaces and default colours
+    if (new_width > old_width) {
+        for (u16 y = 0; y < MIN(old_height, new_height); y++) {
+            term_window_paint_rect(
+                window,
+                term_rect(old_width, y, new_width - old_width, 1),
+                ' ',
+                0xFFFFFF,
+                0x000000);
+        }
+    }
+    if (new_height > old_height) {
+        term_window_paint_rect(
+            window,
+            term_rect(0, old_height, new_width, new_height - old_height),
+            ' ',
+            0xFFFFFF,
+            0x000000);
     }
 }

@@ -146,6 +146,7 @@ typedef struct {
 
 void term_window_init(TermWindow* window, TermRect rect);
 void term_window_done(TermWindow* window);
+void term_window_resize(TermWindow* window, TermRect new_rect);
 void term_window_clear(const TermWindow* window, u32 ch, u32 ink, u32 paper);
 void term_window_rect(const TermWindow* window, TermRect rect, u32 ch);
 void term_window_paint(const TermWindow* window,
@@ -167,6 +168,10 @@ void term_window_formatv(
 void term_window_format(TermWindow* window, int x, int y, cstr fmt, ...);
 
 void term_window_draw(const TermWindow* window);
+
+//------------------------------------------------------------------------------
+// Terminal console
+//------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
 // Terminal information dumping
