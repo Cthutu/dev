@@ -5,7 +5,7 @@
       "name": "Launch Executable (Linux)",
       "type": "lldb",
       "request": "launch",
-      "program": "${workspaceFolder}/_bin/demo-server-debug",
+      "program": "${workspaceFolder}/_bin/demo-window-debug",
       "args": [
         "build"
       ],

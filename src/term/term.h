@@ -145,13 +145,19 @@ typedef struct {
 } TermWindow;
 
 void term_window_init(TermWindow* window, TermRect rect);
-void term_window_clear(TermWindow* window, u32 ch, u32 ink, u32 paper);
-void term_window_rect(TermWindow* window, TermRect rect, u32 ch);
+void term_window_done(TermWindow* window);
+void term_window_clear(const TermWindow* window, u32 ch, u32 ink, u32 paper);
+void term_window_rect(const TermWindow* window, TermRect rect, u32 ch);
 void term_window_paint(const TermWindow* window,
                        TermRect          rect,
                        u32               ink,
                        u32               paper);
-void term_window_9slice(const TermWindow* window, TermRect rect, cstr slices);
+void term_window_paint_rect(
+    const TermWindow* window, TermRect rect, u32 ch, u32 ink, u32 paper);
+void term_window_9slice(const TermWindow* window,
+                        TermRect          rect,
+                        cstr              slices,
+                        bool              fill_centre);
 
 void term_window_write(TermWindow* window, int x, int y, string str);
 void term_window_write_cstr(TermWindow* window, int x, int y, cstr string);
