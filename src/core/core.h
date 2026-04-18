@@ -500,6 +500,8 @@ void epr(const char* format, ...);
 void eprn(const char* format, ...);
 
 #define ANSI_RESET "\033[0m"
+#define ANSI_FG_RESET "\033[39m"
+#define ANSI_BG_RESET "\033[49m"
 #define ANSI_BOLD "\033[1m"
 #define ANSI_FAINT "\033[2m"
 #define ANSI_UNDERLINE "\033[4m"
