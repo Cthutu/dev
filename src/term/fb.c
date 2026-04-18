@@ -461,7 +461,18 @@ void term_fb_format(u16 x, u16 y, cstr fmt, ...)
 //------------------------------------------------------------------------------
 // Presentation
 
-void term_fb_present(void)
+bool _term_fb_has_dirty(void)
+{
+    usize count = (usize)g_term_fb_size.width * (usize)g_term_fb_size.height;
+    for (usize i = 0; i < count; i++) {
+        if (g_term_fb_dirty[i] != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void _term_fb_present_now(void)
 {
     TermSize size = g_term_fb_size;
     arena_reset(&g_term_arena);
@@ -481,10 +492,8 @@ void term_fb_present(void)
     u16 last_x          = 0;
     u16 last_y          = 0;
 
-    bool cursor_visible = g_cursor_visible;
-
-    if (cursor_visible) {
-        term_cursor_hide();
+    if (g_cursor_visible) {
+        arena_format(&g_term_arena, "\x1b[?25l");
     }
 
     // Write home code
@@ -560,10 +569,25 @@ void term_fb_present(void)
         }
     }
 
+    if (g_cursor_visible) {
+        arena_format(
+            &g_term_arena, "\x1b[%d;%dH", g_cursor_y + 1, g_cursor_x + 1);
+        arena_format(&g_term_arena,
+                     "\x1b[38;2;%u;%u;%um",
+                     (g_cursor_ink >> 16) & 0xFF,
+                     (g_cursor_ink >> 8) & 0xFF,
+                     (g_cursor_ink >> 0) & 0xFF);
+        arena_format(&g_term_arena,
+                     "\x1b[48;2;%u;%u;%um",
+                     (g_cursor_paper >> 16) & 0xFF,
+                     (g_cursor_paper >> 8) & 0xFF,
+                     (g_cursor_paper >> 0) & 0xFF);
+        arena_format(&g_term_arena, "\x1b[?25h");
+    } else {
+        arena_format(&g_term_arena, "\x1b[?25l");
+    }
+
     arena_null_terminate(&g_term_arena);
     cstr output = (cstr)g_term_arena.memory;
     pr("%s", output);
-    if (cursor_visible) {
-        term_cursor_show();
-    }
 }

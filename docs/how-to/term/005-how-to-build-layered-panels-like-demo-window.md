@@ -15,7 +15,7 @@ onto the framebuffer in draw order.
 4. Render each panel into its own cell buffer.
 5. Clear the framebuffer.
 6. Draw the windows in back-to-front order.
-7. Present the final frame.
+7. Let `term_loop()` present the final frame.
 
 ## Example
 
@@ -64,7 +64,6 @@ int run(int argc, char** argv)
         if (size.width < 40 || size.height < 12) {
             term_fb_cls(COLOUR_WHITE, COLOUR_BLACK);
             term_fb_write_cstr(2, 2, "Terminal too small for layered panels");
-            term_fb_present();
             continue;
         }
 
@@ -83,7 +82,6 @@ int run(int argc, char** argv)
         term_window_draw(&ui.backdrop);
         term_window_draw(&ui.status);
         term_window_draw(&ui.dialog);
-        term_fb_present();
 
         term_window_done(&ui.backdrop);
         term_window_done(&ui.status);

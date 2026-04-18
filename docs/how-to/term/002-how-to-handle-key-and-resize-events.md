@@ -56,7 +56,6 @@ int run(int argc, char** argv)
                        current_size.width,
                        current_size.height);
         term_fb_write_cstr(2, 4, "Resize the terminal or press q");
-        term_fb_present();
     }
 
     return 0;

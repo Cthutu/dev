@@ -13,6 +13,11 @@
 
 Term g_term;
 bool g_cursor_visible      = true;
+bool g_cursor_dirty        = true;
+int  g_cursor_x            = 0;
+int  g_cursor_y            = 0;
+u32  g_cursor_ink          = 0xFFFFFF;
+u32  g_cursor_paper        = 0x000000;
 
 Array(u32) g_term_fb_chars = NULL;
 Array(u32) g_term_fb_ink   = NULL;
@@ -29,10 +34,13 @@ internal void _term_raw_leave();
 
 void _term_fb_resize(u16 width, u16 height);
 void _term_fb_done();
+bool _term_fb_has_dirty(void);
+void _term_fb_present_now(void);
 
 internal void _term_start(void);
 internal void _term_stop(void);
 internal void _term_check_resize(void);
+internal void _term_maybe_present(void);
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -244,6 +252,7 @@ bool term_loop()
                 events--;
             }
         }
+        _term_maybe_present();
         return true;
     } else {
         _term_stop();
@@ -275,7 +284,8 @@ internal void _term_raw_enter(void)
     raw_mode &=
         ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
     raw_mode |= (ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS);
-    raw_mode &= ~(ENABLE_QUICK_EDIT_MODE | ENABLE_INSERT_MODE);
+    raw_mode &=
+        ~(ENABLE_QUICK_EDIT_MODE | ENABLE_INSERT_MODE | ENABLE_MOUSE_INPUT);
 
     if (!SetConsoleMode(input, raw_mode)) {
         eprn("Failed to set raw console input mode");
@@ -320,6 +330,100 @@ internal void _term_raw_leave(void)
 // Signals when the terminal resizes
 global_variable volatile sig_atomic_t g_term_resize_signal = 0;
 global_variable struct termios        g_term_original_tios;
+global_variable char                  g_term_pending_bytes[32];
+global_variable usize                 g_term_pending_count = 0;
+global_variable usize                 g_term_pending_index = 0;
+global_variable char                  g_term_escape_bytes[32];
+global_variable usize                 g_term_escape_count = 0;
+
+//------------------------------------------------------------------------------
+
+internal void _term_queue_key(char c)
+{
+    TermEvent event;
+    event.kind = TERM_EVENT_KEY;
+    event.key  = c;
+    _term_queue_event(event);
+}
+
+internal bool _term_posix_try_read_byte(char* out_c)
+{
+    int nread = read(STDIN_FILENO, out_c, 1);
+    return nread == 1;
+}
+
+internal void _term_posix_buffer_pending(const char* bytes, usize count)
+{
+    if (count == 0) {
+        g_term_pending_count = 0;
+        g_term_pending_index = 0;
+        return;
+    }
+
+    count = MIN(count, ARRAY_COUNT(g_term_pending_bytes));
+    memcpy(g_term_pending_bytes, bytes, count);
+    g_term_pending_count = count;
+    g_term_pending_index = 0;
+}
+
+internal bool _term_posix_try_drain_escape(void)
+{
+    char next;
+    while (g_term_escape_count < ARRAY_COUNT(g_term_escape_bytes) &&
+           _term_posix_try_read_byte(&next)) {
+        g_term_escape_bytes[g_term_escape_count++] = next;
+    }
+
+    if (g_term_escape_count < 2 || g_term_escape_bytes[0] != '\033') {
+        return false;
+    }
+
+    if (g_term_escape_count == 1) {
+        return false;
+    }
+
+    if (g_term_escape_bytes[1] == 'O') {
+        char final = g_term_escape_bytes[g_term_escape_count - 1];
+        if (final >= '@' && final <= '~') {
+            g_term_escape_count = 0;
+            return true;
+        }
+        return false;
+    }
+
+    if (g_term_escape_bytes[1] != '[') {
+        _term_queue_key(g_term_escape_bytes[0]);
+        _term_posix_buffer_pending(
+            g_term_escape_bytes + 1, g_term_escape_count - 1);
+        g_term_escape_count = 0;
+        return true;
+    }
+
+    if (g_term_escape_count >= 6 && g_term_escape_bytes[2] == 'M') {
+        g_term_escape_count = 0;
+        return true;
+    }
+
+    if (g_term_escape_count >= 3 && g_term_escape_bytes[2] == '<') {
+        for (usize i = 3; i < g_term_escape_count; i++) {
+            if (g_term_escape_bytes[i] == 'm' || g_term_escape_bytes[i] == 'M') {
+                g_term_escape_count = 0;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (g_term_escape_count >= 3) {
+        char final = g_term_escape_bytes[g_term_escape_count - 1];
+        if (final >= '@' && final <= '~') {
+            g_term_escape_count = 0;
+            return true;
+        }
+    }
+
+    return false;
+}
 
 //------------------------------------------------------------------------------
 
@@ -356,6 +460,9 @@ internal void _term_raw_enter(void)
     raw_tios.c_cc[VTIME] = 0;
 
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_tios);
+    g_term_pending_count = 0;
+    g_term_pending_index = 0;
+    g_term_escape_count  = 0;
 }
 
 internal void _term_raw_leave(void)
@@ -365,14 +472,33 @@ internal void _term_raw_leave(void)
 
 internal void _term_raw_key(void)
 {
-    char c;
-    int  nread = read(STDIN_FILENO, &c, 1);
-    if (nread == 1) {
-        TermEvent event;
-        event.kind = TERM_EVENT_KEY;
-        event.key  = c;
-        _term_queue_event(event);
+    if (g_term_pending_index < g_term_pending_count) {
+        _term_queue_key(g_term_pending_bytes[g_term_pending_index++]);
+        if (g_term_pending_index == g_term_pending_count) {
+            g_term_pending_count = 0;
+            g_term_pending_index = 0;
+        }
+        return;
     }
+
+    if (g_term_escape_count > 0) {
+        _term_posix_try_drain_escape();
+        return;
+    }
+
+    char first;
+    if (!_term_posix_try_read_byte(&first)) {
+        return;
+    }
+
+    if (first != '\033') {
+        _term_queue_key(first);
+        return;
+    }
+
+    g_term_escape_bytes[0] = first;
+    g_term_escape_count    = 1;
+    _term_posix_try_drain_escape();
 }
 
 //------------------------------------------------------------------------------
@@ -422,6 +548,7 @@ bool term_loop(void)
         // Check for terminal resize signal
         _term_check_resize();
         _term_raw_key();
+        _term_maybe_present();
         return true;
     } else {
         // Unregister the signal handler
@@ -478,9 +605,9 @@ internal void _term_queue_event(TermEvent event)
 
 //------------------------------------------------------------------------------
 
-internal void _term_alt_enter(void) { pr("\x1b[?1049h"); }
+internal void _term_alt_enter(void) { pr("\x1b[?1007l\x1b[?1049h"); }
 
-internal void _term_alt_leave(void) { pr("\x1b[?1049l"); }
+internal void _term_alt_leave(void) { pr("\x1b[?1049l\x1b[?1007h"); }
 
 //------------------------------------------------------------------------------
 
@@ -495,9 +622,7 @@ internal void _term_stop(void)
 {
     array_free(g_term.event_queue);
     _term_fb_done();
-    if (!g_cursor_visible) {
-        term_cursor_show();
-    }
+    term_cursor_show();
     _term_alt_leave();
     _term_raw_leave();
     arena_done(&g_term_arena);
@@ -516,6 +641,14 @@ internal void _term_check_resize()
         event.size = g_term.size;
         _term_queue_event(event);
         _term_fb_resize(new_size.width, new_size.height);
+    }
+}
+
+internal void _term_maybe_present(void)
+{
+    if (g_cursor_dirty || _term_fb_has_dirty()) {
+        _term_fb_present_now();
+        g_cursor_dirty           = false;
     }
 }
 
@@ -568,12 +701,14 @@ void term_cursor_show(void)
 {
     pr("\x1b[?25h");
     g_cursor_visible = true;
+    g_cursor_dirty   = true;
 }
 
 void term_cursor_hide(void)
 {
     pr("\x1b[?25l");
     g_cursor_visible = false;
+    g_cursor_dirty   = true;
 }
 
 //------------------------------------------------------------------------------
@@ -589,6 +724,9 @@ void term_cursor_goto(int x, int y)
             x = size.width + x;
         }
     }
+    g_cursor_x = x;
+    g_cursor_y = y;
+    g_cursor_dirty = true;
     ++x;
     ++y;
     pr("\x1b[%d;%dH", y, x);
@@ -649,6 +787,9 @@ void term_cursor_left(int delta)
 
 void term_cursor_colour(u32 ink, u32 paper)
 {
+    g_cursor_ink   = ink;
+    g_cursor_paper = paper;
+    g_cursor_dirty = true;
     u8 ink_r   = (ink >> 16) & 0xFF;
     u8 ink_g   = (ink >> 8) & 0xFF;
     u8 ink_b   = (ink >> 0) & 0xFF;

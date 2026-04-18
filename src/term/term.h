@@ -105,12 +105,6 @@ void term_fb_write(u16 x, u16 y, string str);
 void term_fb_formatv(u16 x, u16 y, cstr fmt, va_list args);
 void term_fb_format(u16 x, u16 y, cstr fmt, ...);
 
-//
-// Presentation
-//
-
-void term_fb_present();
-
 //------------------------------------------------------------------------------
 // TermRect utilities
 //------------------------------------------------------------------------------
@@ -202,12 +196,25 @@ void term_window_draw(const TermWindow* window);
 // ENTER to accept the input, this will return true and the string returned.
 //------------------------------------------------------------------------------
 
-// TODO: Read the documentation just above and implement the following functions
-// not forgetting to implement the TermConsole too.  The implementation should
-// go in console.c and there should be unit tests, a demo that create a console
-// that matches the terminal size (and react to a resize), outputs messages
-// every 5 seconds and echos any input that is received.  Also, how-to guides
-// must be created too.
+typedef struct {
+    string text;
+    bool   wrap;
+} TermConsoleChunk;
+
+typedef struct {
+    TermWindow* window;
+    u32         default_ink;
+    u32         default_paper;
+    u32         history_size;
+    bool        input_enabled;
+    bool        focused;
+    bool        has_pending_input;
+    usize       scroll_offset;
+    Array(TermConsoleChunk) history;
+    Array(u8)             prompt;
+    Array(u8)             input;
+    Array(u8)             pending_input;
+} TermConsole;
 
 void term_console_init(TermConsole* console,
                        TermWindow*  window,

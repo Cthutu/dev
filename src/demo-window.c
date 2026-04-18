@@ -271,7 +271,6 @@ internal void demo_render(DemoWindowState* state, u32 frame)
         term_fb_format(
             2, 4, "Need at least 36x14, have %ux%u.", size.width, size.height);
         term_fb_write_cstr(2, 6, "Resize the terminal or press q.");
-        term_fb_present();
         return;
     }
 
@@ -312,7 +311,6 @@ internal void demo_render(DemoWindowState* state, u32 frame)
     term_window_draw(&state->probe_panel);
     term_window_draw(&state->main_panel);
     term_window_draw(&state->ticker_panel);
-    term_fb_present();
 }
 
 int run(int argc, char** argv)

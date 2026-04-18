@@ -42,7 +42,6 @@ int run(int argc, char** argv)
         if (size.width < 12 || size.height < 8) {
             term_fb_cls(COLOUR_WHITE, COLOUR_BLACK);
             term_fb_write_cstr(1, 1, "Terminal too small");
-            term_fb_present();
             continue;
         }
 
@@ -65,7 +64,6 @@ int run(int argc, char** argv)
 
         term_fb_cls(COLOUR_WHITE, COLOUR_BLACK);
         term_window_draw(&panel);
-        term_fb_present();
 
         term_window_done(&panel);
     }

@@ -58,7 +58,6 @@ int run(int argc, char** argv)
 
         term_fb_cls(COLOUR_WHITE, COLOUR_BLACK);
         term_window_draw(&panel);
-        term_fb_present();
 
         term_window_done(&panel);
     }

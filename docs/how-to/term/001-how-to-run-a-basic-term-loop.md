@@ -12,7 +12,7 @@ Initialise the terminal, render each frame, react to quit input, and shut down c
 2. Optionally hide the cursor with `term_cursor_hide()`.
 3. Run your frame loop with `while (term_loop())`.
 4. Call `term_poll_event()` each frame to consume one queued event.
-5. Render into the framebuffer and finish with `term_fb_present()`.
+5. Render into the framebuffer and let `term_loop()` flush the pending framebuffer changes.
 6. Call `term_done()` when you want the loop to stop.
 
 ## Example
@@ -41,7 +41,6 @@ int run(int argc, char** argv)
         term_fb_cls(COLOUR_WHITE, COLOUR_BLACK);
         term_fb_write_cstr(2, 2, "Hello from term");
         term_fb_write_cstr(2, 4, "Press q to quit");
-        term_fb_present();
     }
 
     return 0;

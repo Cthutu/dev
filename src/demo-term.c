@@ -19,7 +19,6 @@ int run(int argc, char** argv)
         case TERM_EVENT_NONE:
             term_fb_cls(theme.ink, theme.paper);
             term_fb_format(2, 2, "Hello, World!");
-            term_fb_present();
             break;
         case TERM_EVENT_KEY:
             // Handle key event

@@ -4,14 +4,15 @@ This guide covers the direct drawing API for full-screen terminal rendering.
 
 ## Goal
 
-Clear the screen, draw coloured regions, write text, and present the frame.
+Clear the screen, draw coloured regions, write text, and let `term_loop()`
+present the frame.
 
 ## Steps
 
 1. Start each frame with `term_fb_cls()`.
 2. Use `term_fb_rect()` or the per-layer rectangle helpers to paint areas.
 3. Write text with `term_fb_write_cstr()`, `term_fb_write()`, or `term_fb_format()`.
-4. Flush the dirty cells with `term_fb_present()`.
+4. `term_loop()` flushes dirty framebuffer cells after your frame code runs.
 
 ## Example
 
@@ -49,8 +50,6 @@ int run(int argc, char** argv)
         term_fb_format(4, 5, "Size: %ux%u",
                        term_size_get().width,
                        term_size_get().height);
-
-        term_fb_present();
     }
 
     return 0;
@@ -61,7 +60,7 @@ int run(int argc, char** argv)
 
 - The framebuffer is clipped to the current terminal size automatically.
 - `term_fb_write()` handles UTF-8 and wide glyphs.
-- `term_fb_present()` only writes dirty cells, so changing less of the framebuffer reduces terminal output.
+- Framebuffer presentation is driven by `term_loop()` and still only flushes dirty cells, so changing less of the framebuffer reduces terminal output.
 - The framebuffer write functions do not parse ANSI escape sequences. If you want inline ANSI colours, use `TermWindow` text APIs instead.
 
 ## Related files
