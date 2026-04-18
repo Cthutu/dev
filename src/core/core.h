@@ -263,6 +263,8 @@ usize mem_get_total_allocated(void);
     (type*)mem_realloc((ptr), sizeof(type) * (count), __FILE__, __LINE__)
 #define ARRAY_FREE(ptr) FREE(ptr)
 
+#define ARRAY_COUNT(arr) (sizeof(arr) / sizeof((arr)[0]))
+
 void mem_break_on_alloc(u64 index);
 
 //------------------------------------------------------------------------------[Array]
@@ -645,6 +647,12 @@ string string_format(Arena* arena, cstr fmt, ...);
 string string_from(u8* data, usize size);
 
 #define S(str) string_from_cstr(str)
+
+// Calculate the number of actual characters ignoring ANSI escape codes
+usize string_character_count(string str);
+
+// Calculate the number of lines in a string
+usize string_line_count(string str);
 
 //------------------------------------------------------------------------------
 // String processing

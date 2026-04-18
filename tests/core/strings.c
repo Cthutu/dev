@@ -47,3 +47,19 @@ TEST_CASE(string, builder_appends_and_formats)
 
     arena_done(&arena);
 }
+
+TEST_CASE(string, character_count_counts_visible_characters)
+{
+    TEST_ASSERT_EQ(string_character_count(S("")), 0);
+    TEST_ASSERT_EQ(string_character_count(S("hello")), 5);
+    TEST_ASSERT_EQ(string_character_count(S("\033[31mred\033[0m")), 3);
+    TEST_ASSERT_EQ(string_character_count(S("a\033[1;32mb\033[0mc")), 3);
+}
+
+TEST_CASE(string, line_count_counts_newlines)
+{
+    TEST_ASSERT_EQ(string_line_count(S("")), 1);
+    TEST_ASSERT_EQ(string_line_count(S("single line")), 1);
+    TEST_ASSERT_EQ(string_line_count(S("one\ntwo")), 2);
+    TEST_ASSERT_EQ(string_line_count(S("one\ntwo\n")), 3);
+}

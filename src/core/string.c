@@ -179,5 +179,43 @@ string sb_to_string(StringBuilder* sb)
     return (string){.data = sb->data, .count = sb->size};
 }
 
+usize string_character_count(string str)
+{
+    usize count = 0;
+    usize i     = 0;
+    while (i < str.count) {
+        if (str.data[i] == '\033') {
+            // Skip ANSI escape code
+            i++;
+            if (i < str.count && str.data[i] == '[') {
+                i++;
+                while (i < str.count &&
+                       ((str.data[i] < '@' || str.data[i] > '~') &&
+                        str.data[i] != '\033')) {
+                    i++;
+                }
+                if (i < str.count) {
+                    i++;
+                }
+            }
+        } else {
+            count++;
+            i++;
+        }
+    }
+    return count;
+}
+
+usize string_line_count(string str)
+{
+    usize count = 1; // Start with 1 line
+    for (usize i = 0; i < str.count; i++) {
+        if (str.data[i] == '\n') {
+            count++;
+        }
+    }
+    return count;
+}
+
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
