@@ -5,7 +5,13 @@ import subprocess
 import sys
 
 import build as build_script
-from common import RICH_CONSOLE, available_top_level_c_paths, parse_description
+from common import (
+    RICH_CONSOLE,
+    CommandFailure,
+    available_top_level_c_paths,
+    parse_description,
+    print_command_failure,
+)
 from rich import box
 from rich.table import Table
 
@@ -53,7 +59,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.release:
         build_argv.append("--release")
     build_argv.append(args.project)
-    build_script.main(build_argv)
+    try:
+        build_script.main(build_argv)
+    except CommandFailure as error:
+        print_command_failure(error)
+        raise SystemExit(error.returncode)
 
     profile = "release" if args.release else "debug"
     executable = build_script.executable_path(args.project, profile)
