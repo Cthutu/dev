@@ -8,8 +8,6 @@
 
 #include <term/term.h>
 
-#include <stdio.h>
-
 typedef struct {
     TermWindow backdrop;
     TermWindow main_panel;
@@ -56,25 +54,6 @@ demo_window_put(TermWindow* window, int x, int y, u32 ch, u32 ink, u32 paper)
     cell->paper     = paper;
 }
 
-static void demo_window_write(
-    TermWindow* window, int x, int y, cstr text, u32 ink, u32 paper)
-{
-    for (int i = 0; text[i] != '\0'; i++) {
-        demo_window_put(window, x + i, y, (u32)(u8)text[i], ink, paper);
-    }
-}
-
-static void demo_window_writef(
-    TermWindow* window, int x, int y, u32 ink, u32 paper, cstr fmt, ...)
-{
-    char    buffer[128];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    demo_window_write(window, x, y, buffer, ink, paper);
-}
-
 static void demo_window_box(
     TermWindow* window, u32 ink, u32 paper, u32 border_ink, cstr title)
 {
@@ -94,7 +73,7 @@ static void demo_window_box(
                       paper);
 
     if (title && title[0] != '\0' && window->rect.width > 4) {
-        demo_window_write(window, 2, 0, title, border_ink, paper);
+        term_window_write_cstr(window, 2, 0, title);
     }
 }
 
@@ -153,22 +132,17 @@ static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
 
     demo_window_box(window, ink, paper, edge, " TERM WINDOW CONTROL ");
 
-    demo_window_write(window,
-                      2,
-                      2,
-                      "Layered panels, direct cell painting, and clipping.",
-                      ink,
-                      paper);
-    demo_window_write(window, 2, 3, "Press q to quit.", ink, paper);
+    term_window_write_cstr(
+        window, 2, 2, "Layered panels, direct cell painting, and clipping.");
+    term_window_write_cstr(window, 2, 3, "Press q to quit.");
 
-    demo_window_write(window, 2, 5, "Terminal", edge, paper);
-    demo_window_writef(
-        window, 12, 5, ink, paper, "%ux%u", size.width, size.height);
+    term_window_write_cstr(window, 2, 5, "Terminal");
+    term_window_format(window, 12, 5, "%ux%u", size.width, size.height);
 
-    demo_window_write(window, 2, 6, "Frame", edge, paper);
-    demo_window_writef(window, 12, 6, ink, paper, "%u", frame);
+    term_window_write_cstr(window, 2, 6, "Frame");
+    term_window_format(window, 12, 6, "%u", frame);
 
-    demo_window_write(window, 2, 8, "CPU", edge, paper);
+    term_window_write_cstr(window, 2, 8, "CPU");
     demo_window_bar(
         window,
         12,
@@ -179,7 +153,7 @@ static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
         term_rgb(120, 255, 180),
         paper);
 
-    demo_window_write(window, 2, 9, "GPU", edge, paper);
+    term_window_write_cstr(window, 2, 9, "GPU");
     demo_window_bar(
         window,
         12,
@@ -190,7 +164,7 @@ static void demo_draw_main_panel(TermWindow* window, u32 frame, TermSize size)
         term_rgb(255, 120, 120),
         paper);
 
-    demo_window_write(window, 2, 11, "Signal", edge, paper);
+    term_window_write_cstr(window, 2, 11, "Signal");
     if (window->rect.width > 16 && window->rect.height > 13) {
         int plot_width  = window->rect.width - 16;
         int plot_height = demo_min_u16(6, window->rect.height - 13);
@@ -262,12 +236,10 @@ static void demo_draw_ticker_panel(TermWindow* window, u32 frame)
     int msg_len = (int)strlen(msg);
     int span    = msg_len + demo_max_u16(1, window->rect.width - 2);
     int offset  = (int)(frame % (u32)span);
+    int start_x = 1 - offset;
 
-    for (int x = 1; x + 1 < window->rect.width; x++) {
-        int  src = x + offset;
-        char ch  = msg[src % msg_len];
-        demo_window_put(window, x, 1, (u32)(u8)ch, ink, paper);
-    }
+    term_window_write_cstr(window, start_x, 1, msg);
+    term_window_write_cstr(window, start_x + msg_len, 1, msg);
 }
 
 static void demo_render(DemoWindowState* state, u32 frame)
@@ -295,10 +267,8 @@ static void demo_render(DemoWindowState* state, u32 frame)
     i32 probe_y =
         demo_signed_ping_pong(frame / 3, (i32)size.height) - (i32)probe_h / 2;
 
-    u16 ticker_w = demo_min_u16(52, size.width);
-    u16 ticker_x =
-        demo_ping_pong(frame / 2, demo_max_u16(1, size.width - ticker_w / 2));
-    u16 ticker_y = size.height - 2 + ((frame / 18) % 2);
+    u16 ticker_w = size.width;
+    u16 ticker_y = size.height - 3;
 
     term_window_init(&state->backdrop,
                      term_rect(0, 0, size.width, size.height));
@@ -314,7 +284,7 @@ static void demo_render(DemoWindowState* state, u32 frame)
     demo_draw_main_panel(&state->main_panel, frame, size);
 
     term_window_init(&state->ticker_panel,
-                     term_rect(ticker_x, ticker_y, ticker_w, 3));
+                     term_rect(0, ticker_y, ticker_w, 3));
     demo_draw_ticker_panel(&state->ticker_panel, frame);
 
     term_fb_cls(term_rgb(255, 255, 255), term_rgb(0, 0, 0));
