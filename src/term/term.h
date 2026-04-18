@@ -30,14 +30,23 @@ TermSize term_size_get(void);
 typedef enum {
     TERM_EVENT_NONE,
     TERM_EVENT_KEY,
+    TERM_EVENT_MOUSE,
     TERM_EVENT_RESIZE,
 } TermEventKind;
 
 typedef struct {
+    u16 x;
+    u16 y;
+    i16 wheel;
+    u8  buttons;
+} TermMouseEvent;
+
+typedef struct {
     TermEventKind kind;
     union {
-        char     key;
-        TermSize size;
+        char           key;
+        TermSize       size;
+        TermMouseEvent mouse;
     };
 } TermEvent;
 
@@ -209,6 +218,7 @@ typedef struct {
     bool        input_enabled;
     bool        focused;
     bool        has_pending_input;
+    bool        auto_scroll;
     usize       scroll_offset;
     Array(TermConsoleChunk) history;
     Array(u8)             prompt;

@@ -3,7 +3,6 @@
 //
 // Copyright (C)2026 Matt Davies, all rights reserved
 //------------------------------------------------------------------------------
-
 #include <term/term.h>
 
 //------------------------------------------------------------------------------
@@ -27,6 +26,7 @@ TermSize g_term_fb_size    = {0};
 Arena    g_term_arena;
 
 internal void _term_queue_event(TermEvent event);
+internal void _term_queue_mouse(u16 x, u16 y, i16 wheel, u8 buttons);
 internal void _term_alt_enter();
 internal void _term_alt_leave();
 internal void _term_raw_enter();
@@ -248,6 +248,33 @@ bool term_loop()
                         _term_queue_event(event);
                     }
                     break;
+
+                case MOUSE_EVENT:
+                    {
+                        MOUSE_EVENT_RECORD mouse = record.Event.MouseEvent;
+                        u8                 buttons = 0;
+                        i16                wheel   = 0;
+
+                        if (mouse.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) {
+                            buttons |= 0x1;
+                        }
+                        if (mouse.dwButtonState & RIGHTMOST_BUTTON_PRESSED) {
+                            buttons |= 0x2;
+                        }
+                        if (mouse.dwButtonState & FROM_LEFT_2ND_BUTTON_PRESSED) {
+                            buttons |= 0x4;
+                        }
+
+                        if ((mouse.dwEventFlags & MOUSE_WHEELED) != 0) {
+                            wheel = (SHORT)HIWORD(mouse.dwButtonState) > 0 ? 1 : -1;
+                        }
+
+                        _term_queue_mouse((u16)mouse.dwMousePosition.X,
+                                          (u16)mouse.dwMousePosition.Y,
+                                          wheel,
+                                          buttons);
+                    }
+                    break;
                 }
                 events--;
             }
@@ -283,9 +310,8 @@ internal void _term_raw_enter(void)
     DWORD raw_mode               = mode;
     raw_mode &=
         ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
-    raw_mode |= (ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS);
-    raw_mode &=
-        ~(ENABLE_QUICK_EDIT_MODE | ENABLE_INSERT_MODE | ENABLE_MOUSE_INPUT);
+    raw_mode |= (ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT);
+    raw_mode &= ~(ENABLE_QUICK_EDIT_MODE | ENABLE_INSERT_MODE);
 
     if (!SetConsoleMode(input, raw_mode)) {
         eprn("Failed to set raw console input mode");
@@ -346,6 +372,17 @@ internal void _term_queue_key(char c)
     _term_queue_event(event);
 }
 
+internal void _term_queue_mouse(u16 x, u16 y, i16 wheel, u8 buttons)
+{
+    TermEvent event;
+    event.kind         = TERM_EVENT_MOUSE;
+    event.mouse.x      = x;
+    event.mouse.y      = y;
+    event.mouse.wheel  = wheel;
+    event.mouse.buttons = buttons;
+    _term_queue_event(event);
+}
+
 internal bool _term_posix_try_read_byte(char* out_c)
 {
     int nread = read(STDIN_FILENO, out_c, 1);
@@ -366,6 +403,237 @@ internal void _term_posix_buffer_pending(const char* bytes, usize count)
     g_term_pending_index = 0;
 }
 
+internal bool _term_parse_u16_bytes(const char* bytes, usize count, u16* out_value)
+{
+    u64 value = 0;
+    if (count == 0) {
+        return false;
+    }
+
+    for (usize i = 0; i < count; i++) {
+        char c = bytes[i];
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        value = value * 10 + (u64)(c - '0');
+        if (value > 65535) {
+            return false;
+        }
+    }
+
+    *out_value = (u16)value;
+    return true;
+}
+
+internal void _term_posix_shift_escape(usize consumed)
+{
+    if (consumed >= g_term_escape_count) {
+        g_term_escape_count = 0;
+        return;
+    }
+
+    memmove(g_term_escape_bytes,
+            g_term_escape_bytes + consumed,
+            g_term_escape_count - consumed);
+    g_term_escape_count -= consumed;
+}
+
+internal bool _term_posix_decode_mouse_sgr(const char* bytes,
+                                           usize       count,
+                                           usize*      out_consumed)
+{
+    if (count < 6 || bytes[0] != '\033' || bytes[1] != '[' || bytes[2] != '<') {
+        return false;
+    }
+
+    usize first_sep  = 0;
+    usize second_sep = 0;
+    usize final_pos  = 0;
+    for (usize i = 3; i < count; i++) {
+        if (bytes[i] == ';') {
+            if (first_sep == 0) {
+                first_sep = i;
+            } else if (second_sep == 0) {
+                second_sep = i;
+            }
+        } else if (bytes[i] == 'M' || bytes[i] == 'm') {
+            final_pos = i;
+            break;
+        }
+    }
+
+    if (first_sep == 0 || second_sep == 0 || final_pos == 0) {
+        return false;
+    }
+
+    u16 cb = 0;
+    u16 cx = 0;
+    u16 cy = 0;
+    if (!_term_parse_u16_bytes(bytes + 3, first_sep - 3, &cb) ||
+        !_term_parse_u16_bytes(bytes + first_sep + 1,
+                               second_sep - first_sep - 1,
+                               &cx) ||
+        !_term_parse_u16_bytes(
+            bytes + second_sep + 1, final_pos - second_sep - 1, &cy)) {
+        return false;
+    }
+
+    u8  buttons = 0;
+    i16 wheel   = 0;
+    u16 base    = cb & 0x3;
+    if ((cb & 0x40) != 0) {
+        wheel = base == 0 ? 1 : -1;
+    } else if (bytes[final_pos] == 'M') {
+        if (base == 0) {
+            buttons = 0x1;
+        } else if (base == 1) {
+            buttons = 0x4;
+        } else if (base == 2) {
+            buttons = 0x2;
+        }
+    }
+
+    _term_queue_mouse(cx > 0 ? cx - 1 : 0, cy > 0 ? cy - 1 : 0, wheel, buttons);
+    *out_consumed = final_pos + 1;
+    return true;
+}
+
+internal bool _term_posix_decode_mouse_1015(const char* bytes,
+                                            usize       count,
+                                            usize*      out_consumed)
+{
+    if (count < 7 || bytes[0] != '\033' || bytes[1] != '[') {
+        return false;
+    }
+    if (bytes[2] < '0' || bytes[2] > '9') {
+        return false;
+    }
+
+    usize first_sep  = 0;
+    usize second_sep = 0;
+    usize final_pos  = 0;
+    for (usize i = 2; i < count; i++) {
+        if (bytes[i] == ';') {
+            if (first_sep == 0) {
+                first_sep = i;
+            } else if (second_sep == 0) {
+                second_sep = i;
+            }
+        } else if (bytes[i] == 'M') {
+            final_pos = i;
+            break;
+        }
+    }
+
+    if (first_sep == 0 || second_sep == 0 || final_pos == 0) {
+        return false;
+    }
+
+    u16 cb = 0;
+    u16 cx = 0;
+    u16 cy = 0;
+    if (!_term_parse_u16_bytes(bytes + 2, first_sep - 2, &cb) ||
+        !_term_parse_u16_bytes(bytes + first_sep + 1,
+                               second_sep - first_sep - 1,
+                               &cx) ||
+        !_term_parse_u16_bytes(
+            bytes + second_sep + 1, final_pos - second_sep - 1, &cy)) {
+        return false;
+    }
+
+    u8  buttons = 0;
+    i16 wheel   = 0;
+    u16 base    = cb & 0x3;
+    if ((cb & 0x40) != 0) {
+        wheel = base == 0 ? 1 : -1;
+    } else if (base == 0) {
+        buttons = 0x1;
+    } else if (base == 1) {
+        buttons = 0x4;
+    } else if (base == 2) {
+        buttons = 0x2;
+    }
+
+    _term_queue_mouse(cx > 0 ? cx - 1 : 0, cy > 0 ? cy - 1 : 0, wheel, buttons);
+    *out_consumed = final_pos + 1;
+    return true;
+}
+
+internal bool _term_posix_decode_mouse_x10(const char* bytes,
+                                           usize       count,
+                                           usize*      out_consumed)
+{
+    if (count < 6 || bytes[0] != '\033' || bytes[1] != '[' || bytes[2] != 'M') {
+        return false;
+    }
+
+    u8 cb = (u8)bytes[3] - 32;
+    u8 cx = (u8)bytes[4] - 32;
+    u8 cy = (u8)bytes[5] - 32;
+
+    u8  buttons = 0;
+    i16 wheel   = 0;
+    u8  base    = cb & 0x3;
+    if ((cb & 0x40) != 0) {
+        wheel = base == 0 ? 1 : -1;
+    } else if (base == 0) {
+        buttons = 0x1;
+    } else if (base == 1) {
+        buttons = 0x4;
+    } else if (base == 2) {
+        buttons = 0x2;
+    }
+
+    _term_queue_mouse(cx > 0 ? (u16)(cx - 1) : 0,
+                      cy > 0 ? (u16)(cy - 1) : 0,
+                      wheel,
+                      buttons);
+    *out_consumed = 6;
+    return true;
+}
+
+internal bool _term_posix_swallow_mouse_tail(char first)
+{
+    if (first != ';') {
+        return false;
+    }
+
+    char  tail[32];
+    usize count = 0;
+    tail[count++] = first;
+
+    char next;
+    while (count < ARRAY_COUNT(tail) && _term_posix_try_read_byte(&next)) {
+        tail[count++] = next;
+    }
+
+    if (count < 3) {
+        _term_queue_key(first);
+        if (count > 1) {
+            _term_posix_buffer_pending(tail + 1, count - 1);
+        }
+        return true;
+    }
+
+    if (tail[count - 1] != 'M') {
+        _term_queue_key(first);
+        if (count > 1) {
+            _term_posix_buffer_pending(tail + 1, count - 1);
+        }
+        return true;
+    }
+
+    for (usize i = 1; i + 1 < count; i++) {
+        if ((tail[i] < '0' || tail[i] > '9') && tail[i] != ';') {
+            _term_queue_key(first);
+            _term_posix_buffer_pending(tail + 1, count - 1);
+            return true;
+        }
+    }
+
+    return true;
+}
+
 internal bool _term_posix_try_drain_escape(void)
 {
     char next;
@@ -383,10 +651,12 @@ internal bool _term_posix_try_drain_escape(void)
     }
 
     if (g_term_escape_bytes[1] == 'O') {
-        char final = g_term_escape_bytes[g_term_escape_count - 1];
-        if (final >= '@' && final <= '~') {
-            g_term_escape_count = 0;
-            return true;
+        for (usize i = 2; i < g_term_escape_count; i++) {
+            char final = g_term_escape_bytes[i];
+            if (final >= '@' && final <= '~') {
+                _term_posix_shift_escape(i + 1);
+                return true;
+            }
         }
         return false;
     }
@@ -399,15 +669,36 @@ internal bool _term_posix_try_drain_escape(void)
         return true;
     }
 
-    if (g_term_escape_count >= 6 && g_term_escape_bytes[2] == 'M') {
-        g_term_escape_count = 0;
+    usize consumed = 0;
+
+    if (g_term_escape_count >= 6 && g_term_escape_bytes[2] == 'M' &&
+        _term_posix_decode_mouse_x10(
+            g_term_escape_bytes, g_term_escape_count, &consumed)) {
+        _term_posix_shift_escape(consumed);
         return true;
     }
 
     if (g_term_escape_count >= 3 && g_term_escape_bytes[2] == '<') {
         for (usize i = 3; i < g_term_escape_count; i++) {
             if (g_term_escape_bytes[i] == 'm' || g_term_escape_bytes[i] == 'M') {
-                g_term_escape_count = 0;
+                if (_term_posix_decode_mouse_sgr(
+                        g_term_escape_bytes, g_term_escape_count, &consumed)) {
+                    _term_posix_shift_escape(consumed);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (g_term_escape_count >= 3 &&
+        g_term_escape_bytes[2] >= '0' && g_term_escape_bytes[2] <= '9') {
+        for (usize i = 2; i < g_term_escape_count; i++) {
+            if (g_term_escape_bytes[i] == 'M') {
+                if (_term_posix_decode_mouse_1015(
+                        g_term_escape_bytes, g_term_escape_count, &consumed)) {
+                    _term_posix_shift_escape(consumed);
+                }
                 return true;
             }
         }
@@ -415,10 +706,12 @@ internal bool _term_posix_try_drain_escape(void)
     }
 
     if (g_term_escape_count >= 3) {
-        char final = g_term_escape_bytes[g_term_escape_count - 1];
-        if (final >= '@' && final <= '~') {
-            g_term_escape_count = 0;
-            return true;
+        for (usize i = 2; i < g_term_escape_count; i++) {
+            char final = g_term_escape_bytes[i];
+            if (final >= '@' && final <= '~') {
+                _term_posix_shift_escape(i + 1);
+                return true;
+            }
         }
     }
 
@@ -492,6 +785,9 @@ internal void _term_raw_key(void)
     }
 
     if (first != '\033') {
+        if (_term_posix_swallow_mouse_tail(first)) {
+            return;
+        }
         _term_queue_key(first);
         return;
     }
@@ -605,9 +901,15 @@ internal void _term_queue_event(TermEvent event)
 
 //------------------------------------------------------------------------------
 
-internal void _term_alt_enter(void) { pr("\x1b[?1007l\x1b[?1049h"); }
+internal void _term_alt_enter(void)
+{
+    pr("\x1b[?1049h\x1b[?1007l\x1b[?1002h\x1b[?1006h");
+}
 
-internal void _term_alt_leave(void) { pr("\x1b[?1049l\x1b[?1007h"); }
+internal void _term_alt_leave(void)
+{
+    pr("\x1b[?1002l\x1b[?1006l\x1b[?1007h\x1b[?1049l");
+}
 
 //------------------------------------------------------------------------------
 

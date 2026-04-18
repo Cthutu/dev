@@ -96,3 +96,57 @@ TEST_CASE(console, resize_reflows_existing_history_into_new_width)
     term_console_done(&console);
     term_window_done(&window);
 }
+
+TEST_CASE(console, mouse_wheel_scrolls_history_without_touching_input)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 6, 2));
+    term_console_init(&console, &window, COLOUR_WHITE, COLOUR_BLACK, 16);
+    term_console_enable_input(&console, false);
+    term_console_write_cstr(&console, "one");
+    term_console_write_cstr(&console, "two");
+    term_console_write_cstr(&console, "three");
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_MOUSE, .mouse.wheel = 1});
+
+    TEST_ASSERT_EQ(console.scroll_offset, 1);
+    TEST_ASSERT_EQ(window.cells[0].ch, 'o');
+    TEST_ASSERT_EQ(window.cells[6].ch, 't');
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, new_output_does_not_snap_when_user_has_scrolled_up)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 6, 2));
+    term_console_init(&console, &window, COLOUR_WHITE, COLOUR_BLACK, 16);
+    term_console_enable_input(&console, false);
+    term_console_write_cstr(&console, "one");
+    term_console_write_cstr(&console, "two");
+    term_console_write_cstr(&console, "three");
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_MOUSE, .mouse.wheel = 1});
+
+    term_console_write_cstr(&console, "four");
+
+    TEST_ASSERT_EQ(console.scroll_offset, 2);
+    TEST_ASSERT(!console.auto_scroll);
+    TEST_ASSERT_EQ(window.cells[0].ch, 'o');
+    TEST_ASSERT_EQ(window.cells[6].ch, 't');
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_MOUSE, .mouse.wheel = -2});
+
+    TEST_ASSERT_EQ(console.scroll_offset, 0);
+    TEST_ASSERT(console.auto_scroll);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}

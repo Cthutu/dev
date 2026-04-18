@@ -12,7 +12,17 @@ global_variable TermConsole* g_term_focused_console = NULL;
 
 //------------------------------------------------------------------------------
 
+typedef struct {
+    usize output_rows;
+    usize input_rows;
+    usize visible_output_rows;
+    usize max_scroll;
+} TermConsoleLayout;
+
+//------------------------------------------------------------------------------
+
 internal void _term_console_redraw(TermConsole* console);
+internal TermConsoleLayout _term_console_layout(const TermConsole* console);
 
 //------------------------------------------------------------------------------
 
@@ -216,6 +226,29 @@ internal void _term_console_push_history(TermConsole* console,
                ((TermConsoleChunk){.text = _term_console_dup_string(str),
                                    .wrap = wrap}));
     _term_console_discard_oldest(console);
+}
+
+internal void _term_console_append_history(
+    TermConsole* console, string str, bool wrap)
+{
+    TermConsoleLayout layout_before = {0};
+    if (!console->auto_scroll) {
+        layout_before = _term_console_layout(console);
+    }
+
+    _term_console_push_history(console, str, wrap);
+
+    if (!console->auto_scroll) {
+        TermConsoleLayout layout_after = _term_console_layout(console);
+        if (layout_after.output_rows > layout_before.output_rows) {
+            console->scroll_offset +=
+                layout_after.output_rows - layout_before.output_rows;
+            console->scroll_offset =
+                MIN(console->scroll_offset, layout_after.max_scroll);
+        }
+    } else {
+        console->scroll_offset = 0;
+    }
 }
 
 internal void _term_console_put_cell(
@@ -431,6 +464,32 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
     }
 }
 
+internal TermConsoleLayout _term_console_layout(const TermConsole* console)
+{
+    TermConsoleLayout layout = {0};
+    int               width  = (int)console->window->rect.width;
+    int               height = (int)console->window->rect.height;
+
+    if (width <= 0 || height <= 0) {
+        return layout;
+    }
+
+    layout.input_rows = _term_console_input_rows(console, width);
+    _term_console_measure_output(console, width, &layout.output_rows);
+
+    usize input_start = layout.output_rows;
+    if (input_start + layout.input_rows > (usize)height) {
+        input_start = (usize)height - MIN(layout.input_rows, (usize)height);
+    }
+
+    layout.visible_output_rows = MIN(input_start, (usize)height);
+    layout.max_scroll =
+        layout.output_rows > layout.visible_output_rows
+            ? layout.output_rows - layout.visible_output_rows
+            : 0;
+    return layout;
+}
+
 internal void _term_console_redraw(TermConsole* console)
 {
     TermWindow* window = console->window;
@@ -445,26 +504,24 @@ internal void _term_console_redraw(TermConsole* console)
         return;
     }
 
-    usize output_rows = 0;
-    usize input_rows  = _term_console_input_rows(console, width);
-    _term_console_measure_output(console, width, &output_rows);
+    TermConsoleLayout layout = _term_console_layout(console);
 
-    usize input_start = output_rows;
-    if (input_start + input_rows > (usize)height) {
-        input_start = (usize)height - MIN(input_rows, (usize)height);
+    usize input_start      = layout.output_rows;
+    if (input_start + layout.input_rows > (usize)height) {
+        input_start = (usize)height - MIN(layout.input_rows, (usize)height);
     }
 
-    usize visible_output_rows = MIN(input_start, (usize)height);
-    usize max_scroll          = output_rows > visible_output_rows
-                                    ? output_rows - visible_output_rows
-                                    : 0;
-    console->scroll_offset    = MIN(console->scroll_offset, max_scroll);
-    usize output_start        = output_rows > visible_output_rows
-                                    ? output_rows - visible_output_rows -
+    console->scroll_offset = MIN(console->scroll_offset, layout.max_scroll);
+    if (console->scroll_offset == 0) {
+        console->auto_scroll = true;
+    }
+    usize output_start     = layout.output_rows > layout.visible_output_rows
+                                    ? layout.output_rows - layout.visible_output_rows -
                                           console->scroll_offset
                                     : 0;
 
-    _term_console_draw_output(console, output_start, visible_output_rows);
+    _term_console_draw_output(
+        console, output_start, layout.visible_output_rows);
     _term_console_draw_input(console, input_start);
     term_window_draw(window);
 }
@@ -484,6 +541,7 @@ void term_console_init(TermConsole* console,
     console->history_size   = history_size;
     console->input_enabled  = true;
     console->focused        = false;
+    console->auto_scroll    = true;
     console->scroll_offset  = 0;
     _term_console_redraw(console);
 }
@@ -525,7 +583,6 @@ void term_console_set_prompt(TermConsole* console, string prompt)
 void term_console_resize(TermConsole* console, TermRect new_rect)
 {
     term_window_resize(console->window, new_rect);
-    console->scroll_offset = 0;
     _term_console_redraw(console);
 }
 
@@ -535,14 +592,14 @@ void term_console_clear(TermConsole* console)
         FREE(console->history[i].text.data);
     }
     array_clear(console->history);
+    console->auto_scroll   = true;
     console->scroll_offset = 0;
     _term_console_redraw(console);
 }
 
 void term_console_write(TermConsole* console, string str)
 {
-    _term_console_push_history(console, str, false);
-    console->scroll_offset = 0;
+    _term_console_append_history(console, str, false);
     _term_console_redraw(console);
 }
 
@@ -553,8 +610,7 @@ void term_console_write_cstr(TermConsole* console, cstr string)
 
 void term_console_write_wrap(TermConsole* console, string str)
 {
-    _term_console_push_history(console, str, true);
-    console->scroll_offset = 0;
+    _term_console_append_history(console, str, true);
     _term_console_redraw(console);
 }
 
@@ -619,6 +675,24 @@ void term_console_send_event(TermConsole* console, TermEvent event)
             }
         } else if ((u8)event.key >= 32) {
             array_push(console->input, (u8)event.key);
+        }
+        break;
+
+    case TERM_EVENT_MOUSE:
+        if (event.mouse.wheel != 0) {
+            TermConsoleLayout layout = _term_console_layout(console);
+            if (layout.max_scroll > 0) {
+                isize next_offset = (isize)console->scroll_offset;
+                if (event.mouse.wheel > 0) {
+                    next_offset += event.mouse.wheel;
+                } else {
+                    next_offset += event.mouse.wheel;
+                }
+                next_offset =
+                    CLAMP(next_offset, 0, (isize)layout.max_scroll);
+                console->scroll_offset = (usize)next_offset;
+                console->auto_scroll   = console->scroll_offset == 0;
+            }
         }
         break;
     }
