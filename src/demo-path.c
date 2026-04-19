@@ -48,6 +48,11 @@ int run(int argc, char** argv)
     UNUSED(argv);
 
     file_init();
+    file_add_home_root();
+    file_add_data_root();
+    file_add_temp_root();
+    file_add_cfg_root();
+    file_add_app_root();
     output_roots();
     prn("");
 
