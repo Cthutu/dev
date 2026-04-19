@@ -46,7 +46,9 @@
 //  - Paths must not end with a slash (`/`), unless the path is the root itself
 //    (e.g. `home:/`).
 //
-// `file_init` must be called to use the path API.
+// `file_init` must be called to use the path API.  It does not register any
+// named roots automatically.  Roots are registered explicitly with the
+// `file_add_*_root()` helpers.
 //------------------------------------------------------------------------------
 
 // Create a path from a platform-specific path.  The resulting path is stored
@@ -136,13 +138,15 @@ string path_sys_filename(string path, Arena* arena);
 // File I/O
 //------------------------------------------------------------------------------
 
-// Initialise the file system.
+// Initialise the file system.  This sets up the module state only; it does not
+// register `home`, `data`, `temp`, `cfg`, or `app`.
 void file_init(void);
 
 // Shutdown the file system.
 void file_done(void);
 
-// Path roots initialisation.
+// Path roots initialisation.  Call the helpers for the roots you want to make
+// available as named agnostic paths.
 void file_add_home_root(void);
 void file_add_data_root(void);
 void file_add_temp_root(void);

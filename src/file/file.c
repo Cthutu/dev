@@ -344,12 +344,6 @@ void file_init(void)
     temp_arena_init();
 
     g_file_system_initialised = true;
-
-    file_add_home_root();
-    file_add_data_root();
-    file_add_temp_root();
-    file_add_cfg_root();
-    file_add_app_root();
 }
 
 //------------------------------------------------------------------------------
