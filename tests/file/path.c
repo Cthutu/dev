@@ -17,6 +17,15 @@ static void test_init_arena(Arena* arena)
     arena_init(arena, .reserved_size = 4096, .grow_rate = 1);
 }
 
+static void test_add_standard_roots(void)
+{
+    file_add_home_root();
+    file_add_data_root();
+    file_add_temp_root();
+    file_add_cfg_root();
+    file_add_app_root();
+}
+
 #if OS_POSIX
 static string test_make_temp_directory(Arena* arena)
 {
@@ -70,6 +79,9 @@ TEST_CASE(path, components_are_extracted_from_a_path)
 
 TEST_CASE(path, validity_matches_the_documented_rules)
 {
+    file_init();
+    test_add_standard_roots();
+
     TEST_ASSERT(path_is_valid(S("home:/")));
     TEST_ASSERT(path_is_valid(S("home:/docs/file.txt")));
     TEST_ASSERT(path_is_valid(S("sys:/tmp/file.txt")));
@@ -80,6 +92,8 @@ TEST_CASE(path, validity_matches_the_documented_rules)
     TEST_ASSERT(!path_is_valid(S("home:/docs/./file.txt")));
     TEST_ASSERT(!path_is_valid(S("home:/docs/../file.txt")));
     TEST_ASSERT(!path_is_valid(S("home:/docs/")));
+
+    file_done();
 }
 
 TEST_CASE(path, join_appends_relative_paths)
@@ -101,6 +115,7 @@ TEST_CASE(path, join_appends_relative_paths)
 TEST_CASE(path, platform_conversion_and_custom_roots_round_trip)
 {
     file_init();
+    file_add_temp_root();
 
     Arena arena;
     test_init_arena(&arena);
