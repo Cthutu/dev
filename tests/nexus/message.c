@@ -58,6 +58,7 @@ typedef struct {
     u32        recv_timeout_ms;
     u32        client_delay_ms;
     u32        client_hold_ms;
+    bool       client_send;
     Net_Result bind_result;
     Net_Result recv_result;
     usize      recv_elapsed_ms;
@@ -325,6 +326,11 @@ internal void* _nexus_delayed_client_send(void* arg)
 
     if (args->client_hold_ms > 0) {
         thread_sleep_ms(args->client_hold_ms);
+    }
+
+    if (!args->client_send) {
+        net_close(&sock);
+        return NULL;
     }
 
     Net_Message msg = net_message_create(&sock);
@@ -657,6 +663,7 @@ TEST_CASE(nexus, recv_times_out_when_client_connects_but_sends_nothing)
         .recv_timeout_ms = 120,
         .client_delay_ms = 20,
         .client_hold_ms  = 200,
+        .client_send     = false,
     };
     _nexus_make_message_test_url(args.url, sizeof(args.url));
 
@@ -680,6 +687,7 @@ TEST_CASE(nexus, recv_succeeds_when_message_arrives_before_timeout)
     RecvTimeoutArgs args = {
         .recv_timeout_ms = 500,
         .client_delay_ms = 100,
+        .client_send     = true,
     };
     _nexus_make_message_test_url(args.url, sizeof(args.url));
 
