@@ -67,10 +67,10 @@ void _term_fb_resize(u16 width, u16 height)
 
 void _term_fb_done(void)
 {
-    array_free(g_term_fb_chars);
-    array_free(g_term_fb_ink);
-    array_free(g_term_fb_paper);
-    array_free(g_term_fb_dirty);
+    array_done(g_term_fb_chars);
+    array_done(g_term_fb_ink);
+    array_done(g_term_fb_paper);
+    array_done(g_term_fb_dirty);
 }
 
 //------------------------------------------------------------------------------

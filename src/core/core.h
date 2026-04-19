@@ -261,7 +261,6 @@ usize mem_get_total_allocated(void);
     (type*)mem_alloc(sizeof(type) * (count), __FILE__, __LINE__)
 #define ARRAY_REALLOC(ptr, type, count)                                        \
     (type*)mem_realloc((ptr), sizeof(type) * (count), __FILE__, __LINE__)
-#define ARRAY_FREE(ptr) FREE(ptr)
 
 #define ARRAY_COUNT(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -311,7 +310,7 @@ void* array_maybe_grow(void* array,
 #define array_pop(a) ((a)[__array_count(a)-- - 1])
 
 // Array free function - deallocates array memory
-#define array_free(a)                                                          \
+#define array_done(a)                                                          \
     do {                                                                       \
         if ((a)) {                                                             \
             ArrayHeader* header = __array_info(a);                             \

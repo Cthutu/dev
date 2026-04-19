@@ -27,7 +27,7 @@ TEST_CASE(array, push_pop)
     TEST_ASSERT_EQ(popped, 3);
     TEST_ASSERT_EQ(array_count(arr), 2);
 
-    array_free(arr);
+    array_done(arr);
     TEST_ASSERT_EQ(arr, NULL);
 }
 
@@ -50,5 +50,5 @@ TEST_CASE(array, delete_clear_and_reserve)
     TEST_ASSERT_EQ(array_count(arr), 5);
     TEST_ASSERT_GE(array_capacity(arr), 5);
 
-    array_free(arr);
+    array_done(arr);
 }

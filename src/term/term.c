@@ -1346,7 +1346,7 @@ internal void _term_start(void)
 
 internal void _term_stop(void)
 {
-    array_free(g_term.event_queue);
+    array_done(g_term.event_queue);
     _term_fb_done();
     term_cursor_show();
     _term_alt_leave();

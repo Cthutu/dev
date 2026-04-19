@@ -302,9 +302,9 @@ internal string _term_console_dup_string(string str)
 // Replace a dynamic byte buffer with a copy of the supplied string contents.
 //------------------------------------------------------------------------------
 
-internal void _term_console_set_bytes(Array(u8)* bytes, string str)
+internal void _term_console_set_bytes(Array(u8) * bytes, string str)
 {
-    array_free(*bytes);
+    array_done(*bytes);
     if (str.count == 0) {
         return;
     }
@@ -812,15 +812,15 @@ void term_console_done(TermConsole* console)
     for (usize i = 0; i < array_count(console->history); i++) {
         FREE(console->history[i].text.data);
     }
-    array_free(console->history);
-    array_free(console->prompt);
-    array_free(console->input);
-    array_free(console->pending_input);
+    array_done(console->history);
+    array_done(console->prompt);
+    array_done(console->input);
+    array_done(console->pending_input);
     for (usize i = 0; i < array_count(console->input_history); i++) {
         FREE(console->input_history[i].data);
     }
-    array_free(console->input_history);
-    array_free(console->input_history_saved);
+    array_done(console->input_history);
+    array_done(console->input_history_saved);
     memset(console, 0, sizeof(*console));
 }
 

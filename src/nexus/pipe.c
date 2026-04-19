@@ -150,7 +150,7 @@ void _net_socket_close_pipes(Net_Socket* sock)
         }
     }
 
-    array_free(data->pipes);
+    array_done(data->pipes);
     data->pending_pipe = NULL;
 }
 

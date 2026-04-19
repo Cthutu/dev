@@ -6,7 +6,7 @@
 #if OS_POSIX
 internal void _term_test_console_reset_term_state(void)
 {
-    array_free(g_term.event_queue);
+    array_done(g_term.event_queue);
     g_term.event_queue   = NULL;
     g_term.key_modifiers = 0;
     _term_test_posix_clear_input_buffers();

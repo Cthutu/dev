@@ -27,7 +27,7 @@ void term_window_init(TermWindow* window, TermRect rect)
 // Free the resources used by a TermWindow.
 //------------------------------------------------------------------------------
 
-void term_window_done(TermWindow* window) { array_free(window->cells); }
+void term_window_done(TermWindow* window) { array_done(window->cells); }
 
 //------------------------------------------------------------------------------
 // term_window_clear

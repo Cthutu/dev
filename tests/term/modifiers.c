@@ -6,11 +6,11 @@
 TEST_CASE(term, key_modifier_helpers_reflect_last_polled_key_event)
 {
     g_term.key_modifiers = 0;
-    array_push(g_term.event_queue,
-               ((TermEvent){.kind = TERM_EVENT_KEY,
-                            .key = 'a',
-                            .key_modifiers = TERM_KEYMOD_CTRL |
-                                             TERM_KEYMOD_SHIFT}));
+    array_push(
+        g_term.event_queue,
+        ((TermEvent){.kind          = TERM_EVENT_KEY,
+                     .key           = 'a',
+                     .key_modifiers = TERM_KEYMOD_CTRL | TERM_KEYMOD_SHIFT}));
 
     TermEvent event = term_poll_event();
 
@@ -21,14 +21,14 @@ TEST_CASE(term, key_modifier_helpers_reflect_last_polled_key_event)
     TEST_ASSERT(term_key_shift_pressed());
     TEST_ASSERT(!term_key_alt_pressed());
 
-    array_free(g_term.event_queue);
+    array_done(g_term.event_queue);
     g_term.key_modifiers = 0;
 }
 
 #if OS_POSIX
 internal void _term_test_reset_state(void)
 {
-    array_free(g_term.event_queue);
+    array_done(g_term.event_queue);
     g_term.event_queue   = NULL;
     g_term.key_modifiers = 0;
     _term_test_posix_clear_input_buffers();

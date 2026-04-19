@@ -15,7 +15,7 @@ TEST_CASE(memory, alloc_realloc_free)
     TEST_ASSERT_EQ(mem_size(buffer), 16);
     TEST_ASSERT_EQ(buffer[0], 0x2a);
 
-    ARRAY_FREE(buffer);
+    array_done(buffer);
     TEST_ASSERT_EQ(buffer, NULL);
 }
 

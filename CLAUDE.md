@@ -48,7 +48,7 @@ Nearly every project depends on `core` (`src/core/core.h`). It is the foundation
 - **Platform detection macros** using `YES`/`NO` rather than `#ifdef`: `OS_WINDOWS`, `OS_LINUX`, `OS_MACOS`, `OS_POSIX`, `COMPILER_CLANG`, `COMPILER_GCC`, `COMPILER_MSVC`, `ARCH_X86_64`, `CONFIG_DEBUG`, `CONFIG_RELEASE`. Use `#if OS_WINDOWS` (not `#ifdef`).
 - **Short fixed-width types**: `u8`/`u16`/`u32`/`u64`, `i8`/…/`i64`, `usize`, `isize`, `f32`, `f64`, `cstr`. Prefer these over raw `uint32_t` etc.
 - **Tracked allocators**: `ALLOC`/`REALLOC`/`FREE`, `ARRAY_ALLOC` — these capture `__FILE__`/`__LINE__` and (in debug) report leaks on exit via `mem_print_leaks()`.
-- **`Array(T)`** — a stb-style header-prefixed dynamic array. Use `array_push`, `array_count`, `array_free`, `array_reserve`, `array_needs`, `array_delete_quick`, etc. Macros rely on `typeof(*(a))` (C23).
+- **`Array(T)`** — a stb-style header-prefixed dynamic array. Use `array_push`, `array_count`, `array_done`, `array_reserve`, `array_needs`, `array_delete_quick`, etc. Macros rely on `typeof(*(a))` (C23).
 - **`Arena`** — OS-reserved paged arena allocator with `arena_init`/`arena_alloc`/`arena_store`+`arena_restore` marks, plus a global temp arena accessed with `temp_arena()` and reset per-frame.
 - **`string`** — a `{u8* data; usize count}` slice (not NUL-terminated). Use `S("lit")` literal macro, `STRINGP`/`STRINGV(s)` to format via `printf`-style (`"%.*s"`). `StringBuilder` writes into an arena.
 - **`Mutex`** — thin wrapper over `CRITICAL_SECTION` or `pthread_mutex_t`.

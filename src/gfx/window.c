@@ -54,7 +54,7 @@ internal void _fs_delete_frame_info(FrameSystem* fs, u64 handle)
 {
     for (u64 i = 0; i < array_count(fs->frames); i++) {
         if (fs->frames[i].handle == handle) {
-            ARRAY_FREE(fs->frames[i].title_heap);
+            array_done(fs->frames[i].title_heap);
             array_delete_quick(fs->frames, i);
             return;
         }
@@ -832,8 +832,8 @@ bool fs_loop(FrameSystem* fs, FrameEvent* out_event)
     //
 
     if ((array_count(fs->frames) == 0) && (array_count(fs->events) == 0)) {
-        array_free(fs->frames);
-        array_free(fs->events);
+        array_done(fs->frames);
+        array_done(fs->events);
         XCloseDisplay(fs->x_display);
         temp_arena_done();
         return false;

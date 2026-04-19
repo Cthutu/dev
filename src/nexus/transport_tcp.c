@@ -416,9 +416,9 @@ _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline)
     Array(Net_PollFd) pollfds   = 0;
     Array(Net_Pipe*) pipes      = 0;
 
-    Net_PollFd listener = {
-        .fd     = sock->fd,
-        .events = NET_POLL_IN,
+    Net_PollFd listener         = {
+                .fd     = sock->fd,
+                .events = NET_POLL_IN,
     };
     array_push(pollfds, listener);
     array_push(pipes, NULL);
@@ -441,14 +441,14 @@ _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline)
     int poll_result = net_os_poll(
         pollfds, array_count(pollfds), _net_timeout_poll_ms(deadline));
     if (poll_result == 0) {
-        array_free(pollfds);
-        array_free(pipes);
+        array_done(pollfds);
+        array_done(pipes);
         return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
     }
     if (poll_result < 0) {
         Net_OsError err = net_os_last_error();
-        array_free(pollfds);
-        array_free(pipes);
+        array_done(pollfds);
+        array_done(pipes);
         net_os_log_error();
         return _net_result_from_os_error(err);
     }
@@ -456,8 +456,8 @@ _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline)
     if (pollfds[0].revents & NET_POLL_IN) {
         Net_Result result = _net_tcp_accept_pending(sock);
         if (NET_FAILED(result)) {
-            array_free(pollfds);
-            array_free(pipes);
+            array_done(pollfds);
+            array_done(pipes);
             return result;
         }
     }
@@ -471,8 +471,8 @@ _net_tcp_poll_ready_pipe(Net_Socket* sock, Net_Pipe** out, TimePoint deadline)
         }
     }
 
-    array_free(pollfds);
-    array_free(pipes);
+    array_done(pollfds);
+    array_done(pipes);
     return NET_OK;
 }
 
