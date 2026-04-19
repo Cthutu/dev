@@ -35,6 +35,7 @@ enum { TERM_FB_CHAR_WIDE_TAIL = 0xFFFFFFFFu };
 
 bool _term_fb_has_dirty(void);
 void _term_fb_present_now(void);
+int  _term_wcwidth(u32 ch);
 
 void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width);
 

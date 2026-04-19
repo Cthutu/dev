@@ -17,22 +17,22 @@
 internal u32 _term_ansi_palette(int index)
 {
     static const u32 palette[16] = {
-        COLOUR_BLACK,
-        COLOUR_RED,
-        COLOUR_GREEN,
-        COLOUR_YELLOW,
-        COLOUR_BLUE,
-        COLOUR_MAGENTA,
-        COLOUR_CYAN,
-        COLOUR_BRIGHT_GREY,
-        COLOUR_GREY,
-        COLOUR_BRIGHT_RED,
-        COLOUR_BRIGHT_GREEN,
-        COLOUR_BRIGHT_YELLOW,
-        COLOUR_BRIGHT_BLUE,
-        COLOUR_BRIGHT_MAGENTA,
-        COLOUR_BRIGHT_CYAN,
-        COLOUR_WHITE,
+        0xFF000000,
+        0xFF800000,
+        0xFF008000,
+        0xFF808000,
+        0xFF000080,
+        0xFF800080,
+        0xFF008080,
+        0xFFC0C0C0,
+        0xFF808080,
+        0xFFFF0000,
+        0xFF00FF00,
+        0xFFFFFF00,
+        0xFF0000FF,
+        0xFFFF00FF,
+        0xFF00FFFF,
+        0xFFFFFFFF,
     };
 
     if (index < 0) {

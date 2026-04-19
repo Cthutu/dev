@@ -309,7 +309,7 @@ void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width)
     *out_char  = ch;
     *out_bytes = bytes;
 
-    int width  = wcwidth((wchar_t)ch);
+    int width  = _term_wcwidth(ch);
     if (width <= 0) {
         width = 1;
     }
@@ -401,7 +401,7 @@ void term_fb_write(u16 x, u16 y, string str)
             goto invalid_char;
         }
 
-        width = (usize)wcwidth((wchar_t)ch);
+        width = (usize)_term_wcwidth(ch);
         if ((int)width <= 0) {
             width = 1;
         }
