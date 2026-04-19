@@ -48,6 +48,63 @@ TEST_CASE(string, builder_appends_and_formats)
     arena_done(&arena);
 }
 
+TEST_CASE(string, equals_and_equals_cstr_compare_contents)
+{
+    TEST_ASSERT(string_equals(S("hello"), S("hello")));
+    TEST_ASSERT(!string_equals(S("hello"), S("world")));
+    TEST_ASSERT(!string_equals(S("hello"), S("hell")));
+
+    TEST_ASSERT(string_equals_cstr(S("hello"), "hello"));
+    TEST_ASSERT(!string_equals_cstr(S("hello"), "hello!"));
+}
+
+TEST_CASE(string, split_once_splits_around_first_delimiter)
+{
+    string left  = {0};
+    string right = {0};
+
+    TEST_ASSERT(string_split_once(S("alpha::beta::gamma"), "::", &left, &right));
+    TEST_ASSERT(string_equals(left, S("alpha")));
+    TEST_ASSERT(string_equals(right, S("beta::gamma")));
+
+    left  = (string){0};
+    right = (string){0};
+    TEST_ASSERT(!string_split_once(S("alpha"), "::", &left, &right));
+    TEST_ASSERT_EQ(left.count, 0);
+    TEST_ASSERT_EQ(right.count, 0);
+}
+
+TEST_CASE(string, split_returns_all_parts)
+{
+    Arena arena;
+    arena_init(&arena, .reserved_size = 4096, .grow_rate = 1);
+
+    strings parts = string_split(S("red,green,blue"), ",", &arena);
+
+    TEST_ASSERT_EQ(parts.count, 3);
+    TEST_ASSERT(string_equals(parts.data[0], S("red")));
+    TEST_ASSERT(string_equals(parts.data[1], S("green")));
+    TEST_ASSERT(string_equals(parts.data[2], S("blue")));
+
+    arena_done(&arena);
+}
+
+TEST_CASE(string, to_u64_accepts_digits_and_rejects_other_input)
+{
+    u64 value = 0;
+
+    TEST_ASSERT(string_to_u64(S("0"), &value));
+    TEST_ASSERT_EQ(value, 0);
+
+    TEST_ASSERT(string_to_u64(S("184467"), &value));
+    TEST_ASSERT_EQ(value, 184467);
+
+    TEST_ASSERT(string_to_u64(S(""), &value));
+    TEST_ASSERT_EQ(value, 0);
+
+    TEST_ASSERT(!string_to_u64(S("12x"), &value));
+}
+
 TEST_CASE(string, character_count_counts_visible_characters)
 {
     TEST_ASSERT_EQ(string_character_count(S("")), 0);

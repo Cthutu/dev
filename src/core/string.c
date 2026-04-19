@@ -107,9 +107,10 @@ strings string_split(string str, cstr delimiter, Arena* arena)
     arena_session_init(&session, arena, sizeof(string), sizeof(string));
 
     string part;
-    while (!string_split_once(str, delimiter, &part, &str)) {
+    while (string_split_once(str, delimiter, &part, &str)) {
         ((string*)arena_session_alloc(&session, 1))[0] = part;
     }
+    ((string*)arena_session_alloc(&session, 1))[0] = str;
 
     return (strings){.data  = (string*)arena_session_address(&session),
                      .count = arena_session_count(&session)};
