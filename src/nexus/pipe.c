@@ -83,8 +83,7 @@ Net_Pipe* _net_pipe_create_tcp(Net_Socket* sock, Net_Fd fd)
 // exists, otherwise creates a new one.
 //------------------------------------------------------------------------------
 
-Net_Pipe* _net_pipe_find_or_create_udp(Net_Socket*     sock,
-                                       const Net_Addr* addr)
+Net_Pipe* _net_pipe_find_or_create_udp(Net_Socket* sock, const Net_Addr* addr)
 {
     Net_SocketData* data = _net_socket_data_ensure(sock);
     for (usize i = 0; i < array_count(data->pipes); ++i) {

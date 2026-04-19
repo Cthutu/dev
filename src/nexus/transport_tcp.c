@@ -80,7 +80,8 @@ _net_poll_fd(Net_Fd fd, u16 events, TimePoint deadline, bool nonblocking)
     };
 
     while (true) {
-        int poll_result = net_os_poll(&poll_fd, 1, _net_timeout_poll_ms(deadline));
+        int poll_result =
+            net_os_poll(&poll_fd, 1, _net_timeout_poll_ms(deadline));
         if (poll_result == 0) {
             return nonblocking ? NET_WOULD_BLOCK : NET_TIMEOUT;
         }
@@ -116,8 +117,11 @@ _net_poll_fd(Net_Fd fd, u16 events, TimePoint deadline, bool nonblocking)
 // until the requested byte count has been sent or an error occurs.
 //------------------------------------------------------------------------------
 
-Net_Result _net_tcp_send_all_fd(
-    Net_Fd fd, const u8* buffer, usize len, TimePoint deadline, bool nonblocking)
+Net_Result _net_tcp_send_all_fd(Net_Fd    fd,
+                                const u8* buffer,
+                                usize     len,
+                                TimePoint deadline,
+                                bool      nonblocking)
 {
     usize sent = 0;
 
@@ -281,8 +285,7 @@ internal Net_Result _net_tcp_recv_exact_fd(Net_Fd    fd,
     usize recv_size = 0;
 
     while (recv_size < len) {
-        Net_Result wait_result =
-            _net_poll_fd(fd, NET_POLL_IN, deadline, false);
+        Net_Result wait_result = _net_poll_fd(fd, NET_POLL_IN, deadline, false);
         if (NET_FAILED(wait_result)) {
             return wait_result;
         }

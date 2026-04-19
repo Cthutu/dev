@@ -5,7 +5,9 @@
       "label": "Compile",
       "type": "process",
       "command": "just",
-      "args": ["build"],
+      "args": [
+        "build"
+      ],
       "group": {
         "kind": "build",
         "isDefault": true

@@ -24,11 +24,11 @@ typedef struct {
 
 //------------------------------------------------------------------------------
 
-internal void _term_console_redraw(TermConsole* console);
+internal void              _term_console_redraw(TermConsole* console);
 internal TermConsoleLayout _term_console_layout(const TermConsole* console);
-internal void _term_console_load_input(TermConsole* console, string str);
+internal void   _term_console_load_input(TermConsole* console, string str);
 internal string _term_console_dup_string(string str);
-internal void _term_console_set_bytes(Array(u8)* bytes, string str);
+internal void   _term_console_set_bytes(Array(u8) * bytes, string str);
 
 //------------------------------------------------------------------------------
 // _term_console_is_word_byte
@@ -55,11 +55,9 @@ internal void _term_console_insert_byte(TermConsole* console, u8 ch)
 
     array_push(console->input, 0);
     if (pos < count) {
-        memmove(console->input + pos + 1,
-                console->input + pos,
-                count - pos);
+        memmove(console->input + pos + 1, console->input + pos, count - pos);
     }
-    console->input[pos] = ch;
+    console->input[pos]   = ch;
     console->input_cursor = pos + 1;
 }
 
@@ -69,9 +67,8 @@ internal void _term_console_insert_byte(TermConsole* console, u8 ch)
 // Delete a half-open range from the editable input buffer.
 //------------------------------------------------------------------------------
 
-internal void _term_console_delete_range(TermConsole* console,
-                                         usize        start,
-                                         usize        end)
+internal void
+_term_console_delete_range(TermConsole* console, usize start, usize end)
 {
     usize count = array_count(console->input);
     start       = MIN(start, count);
@@ -80,9 +77,7 @@ internal void _term_console_delete_range(TermConsole* console,
         return;
     }
 
-    memmove(console->input + start,
-            console->input + end,
-            count - end);
+    memmove(console->input + start, console->input + end, count - end);
     __array_count(console->input) -= end - start;
     console->input_cursor = start;
 }
@@ -117,7 +112,8 @@ internal usize _term_console_word_left(const TermConsole* console, usize cursor)
 // Find the next word boundary from the supplied cursor position.
 //------------------------------------------------------------------------------
 
-internal usize _term_console_word_right(const TermConsole* console, usize cursor)
+internal usize _term_console_word_right(const TermConsole* console,
+                                        usize              cursor)
 {
     usize count = array_count(console->input);
     usize pos   = MIN(cursor, count);
@@ -199,7 +195,8 @@ internal void _term_console_history_down(TermConsole* console)
         return;
     }
 
-    if ((usize)(console->input_history_index + 1) < array_count(console->input_history)) {
+    if ((usize)(console->input_history_index + 1) <
+        array_count(console->input_history)) {
         console->input_history_index++;
     } else {
         console->input_history_index = -1;
@@ -334,9 +331,8 @@ internal void _term_console_discard_oldest(TermConsole* console)
 // Append a chunk to the output history and enforce the history limit.
 //------------------------------------------------------------------------------
 
-internal void _term_console_push_history(TermConsole* console,
-                                         string       str,
-                                         bool         wrap)
+internal void
+_term_console_push_history(TermConsole* console, string str, bool wrap)
 {
     if (str.count == 0) {
         return;
@@ -355,8 +351,8 @@ internal void _term_console_push_history(TermConsole* console,
 // is paused.
 //------------------------------------------------------------------------------
 
-internal void _term_console_append_history(
-    TermConsole* console, string str, bool wrap)
+internal void
+_term_console_append_history(TermConsole* console, string str, bool wrap)
 {
     TermConsoleLayout layout_before = {0};
     if (!console->auto_scroll) {
@@ -445,7 +441,7 @@ internal void _term_console_measure_output(const TermConsole* console,
             usize glyph_width;
             term_utf8_next(&cursor, &ch, &bytes, &glyph_width);
             UNUSED(bytes);
-            s = (const u8*)cursor;
+            s   = (const u8*)cursor;
 
             any = true;
             if (ch == '\n') {
@@ -513,9 +509,9 @@ internal void _term_console_draw_output(const TermConsole* console,
     int   col = 0;
 
     for (usize i = 0; i < array_count(console->history); i++) {
-        TermConsoleChunk chunk = console->history[i];
-        const u8*        s     = chunk.text.data;
-        const u8*        end   = chunk.text.data + chunk.text.count;
+        TermConsoleChunk chunk         = console->history[i];
+        const u8*        s             = chunk.text.data;
+        const u8*        end           = chunk.text.data + chunk.text.count;
         u32              current_ink   = console->output_colour;
         u32              current_paper = COLOUR_BLACK;
 
@@ -599,18 +595,12 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
     usize cursor_total = array_count(console->prompt) + console->input_cursor;
 
     while (index < total && y < (int)window->rect.height) {
-        u8 ch = index < array_count(console->prompt)
-                    ? console->prompt[index]
-                    : console->input[index - array_count(console->prompt)];
+        u8  ch  = index < array_count(console->prompt)
+                      ? console->prompt[index]
+                      : console->input[index - array_count(console->prompt)];
         u32 ink = index < array_count(console->prompt) ? console->prompt_colour
                                                        : console->input_colour;
-        _term_console_put_cell(window,
-                               x,
-                               y,
-                               ch,
-                               1,
-                               ink,
-                               COLOUR_BLACK);
+        _term_console_put_cell(window, x, y, ch, 1, ink, COLOUR_BLACK);
         index++;
         x++;
         if (x >= width) {
@@ -647,7 +637,7 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
 //------------------------------------------------------------------------------
 
 internal void _term_console_draw_scrollbar(const TermConsole* console,
-                                           TermConsoleLayout   layout)
+                                           TermConsoleLayout  layout)
 {
     if (!layout.show_scrollbar || layout.visible_output_rows == 0) {
         return;
@@ -659,30 +649,20 @@ internal void _term_console_draw_scrollbar(const TermConsole* console,
     usize       thumb_height =
         MAX((rows * rows) / MAX(layout.output_rows, (usize)1), (usize)1);
     usize thumb_range = rows > thumb_height ? rows - thumb_height : 0;
-    usize thumb_y     = layout.max_scroll > 0
-                            ? ((layout.max_scroll - console->scroll_offset) *
-                               thumb_range) /
-                                  layout.max_scroll
-                            : 0;
+    usize thumb_y =
+        layout.max_scroll > 0
+            ? ((layout.max_scroll - console->scroll_offset) * thumb_range) /
+                  layout.max_scroll
+            : 0;
 
     for (usize y = 0; y < rows; y++) {
-        _term_console_put_cell(window,
-                               x,
-                               (int)y,
-                               0x2591,
-                               1,
-                               term_rgb(80, 70, 110),
-                               COLOUR_BLACK);
+        _term_console_put_cell(
+            window, x, (int)y, 0x2591, 1, term_rgb(80, 70, 110), COLOUR_BLACK);
     }
 
     for (usize y = thumb_y; y < thumb_y + thumb_height && y < rows; y++) {
-        _term_console_put_cell(window,
-                               x,
-                               (int)y,
-                               0x2588,
-                               1,
-                               term_rgb(255, 180, 80),
-                               COLOUR_BLACK);
+        _term_console_put_cell(
+            window, x, (int)y, 0x2588, 1, term_rgb(255, 180, 80), COLOUR_BLACK);
     }
 }
 
@@ -707,7 +687,8 @@ internal TermConsoleLayout _term_console_layout(const TermConsole* console)
     layout.output_width   = width - (layout.show_scrollbar ? 1 : 0);
     layout.output_width   = MAX(layout.output_width, 0);
     layout.input_rows     = _term_console_input_rows(console, width);
-    _term_console_measure_output(console, layout.output_width, &layout.output_rows);
+    _term_console_measure_output(
+        console, layout.output_width, &layout.output_rows);
 
     usize input_start = layout.output_rows;
     if (input_start + layout.input_rows > (usize)height) {
@@ -715,10 +696,9 @@ internal TermConsoleLayout _term_console_layout(const TermConsole* console)
     }
 
     layout.visible_output_rows = MIN(input_start, (usize)height);
-    layout.max_scroll =
-        layout.output_rows > layout.visible_output_rows
-            ? layout.output_rows - layout.visible_output_rows
-            : 0;
+    layout.max_scroll          = layout.output_rows > layout.visible_output_rows
+                                     ? layout.output_rows - layout.visible_output_rows
+                                     : 0;
     return layout;
 }
 
@@ -744,7 +724,7 @@ internal void _term_console_redraw(TermConsole* console)
 
     TermConsoleLayout layout = _term_console_layout(console);
 
-    usize input_start      = layout.output_rows;
+    usize input_start        = layout.output_rows;
     if (input_start + layout.input_rows > (usize)height) {
         input_start = (usize)height - MIN(layout.input_rows, (usize)height);
     }
@@ -753,15 +733,13 @@ internal void _term_console_redraw(TermConsole* console)
     if (console->scroll_offset == 0) {
         console->auto_scroll = true;
     }
-    usize output_start     = layout.output_rows > layout.visible_output_rows
-                                    ? layout.output_rows - layout.visible_output_rows -
-                                          console->scroll_offset
-                                    : 0;
+    usize output_start = layout.output_rows > layout.visible_output_rows
+                             ? layout.output_rows - layout.visible_output_rows -
+                                   console->scroll_offset
+                             : 0;
 
-    _term_console_draw_output(console,
-                              output_start,
-                              layout.visible_output_rows,
-                              layout.output_width);
+    _term_console_draw_output(
+        console, output_start, layout.visible_output_rows, layout.output_width);
     _term_console_draw_scrollbar(console, layout);
     _term_console_draw_input(console, input_start);
     term_window_draw(window);
@@ -781,16 +759,16 @@ void term_console_init(TermConsole* console,
                        u32          history_size)
 {
     memset(console, 0, sizeof(*console));
-    console->window         = window;
-    console->history_size   = history_size;
-    console->output_colour  = COLOUR_WHITE;
-    console->prompt_colour  = COLOUR_BRIGHT_CYAN;
-    console->input_colour   = COLOUR_BRIGHT_YELLOW;
-    console->input_enabled  = true;
-    console->focused        = false;
-    console->auto_scroll    = true;
-    console->scroll_offset  = 0;
-    console->input_cursor   = 0;
+    console->window              = window;
+    console->history_size        = history_size;
+    console->output_colour       = COLOUR_WHITE;
+    console->prompt_colour       = COLOUR_BRIGHT_CYAN;
+    console->input_colour        = COLOUR_BRIGHT_YELLOW;
+    console->input_enabled       = true;
+    console->focused             = false;
+    console->auto_scroll         = true;
+    console->scroll_offset       = 0;
+    console->input_cursor        = 0;
     console->input_history_index = -1;
     _term_console_redraw(console);
 }
@@ -1058,16 +1036,15 @@ void term_console_send_event(TermConsole* console, TermEvent event)
             _term_console_accept_input(console);
         } else if ((event.key_code == TERM_KEY_BACKSPACE) ||
                    (event.key == 8 || event.key == 127)) {
-            if ((event.key_modifiers & TERM_KEYMOD_CTRL) != 0 || event.key == 23) {
+            if ((event.key_modifiers & TERM_KEYMOD_CTRL) != 0 ||
+                event.key == 23) {
                 usize start =
                     _term_console_word_left(console, console->input_cursor);
                 _term_console_delete_range(
                     console, start, console->input_cursor);
             } else if (console->input_cursor > 0) {
                 _term_console_delete_range(
-                    console,
-                    console->input_cursor - 1,
-                    console->input_cursor);
+                    console, console->input_cursor - 1, console->input_cursor);
             }
         } else if (event.key_code == TERM_KEY_DELETE) {
             if (console->input_cursor < array_count(console->input)) {
@@ -1111,8 +1088,7 @@ void term_console_send_event(TermConsole* console, TermEvent event)
                 } else {
                     next_offset += event.mouse.wheel;
                 }
-                next_offset =
-                    CLAMP(next_offset, 0, (isize)layout.max_scroll);
+                next_offset = CLAMP(next_offset, 0, (isize)layout.max_scroll);
                 console->scroll_offset = (usize)next_offset;
                 console->auto_scroll   = console->scroll_offset == 0;
             }
@@ -1153,8 +1129,8 @@ bool term_console_get_input(TermConsole* console, string* out_input)
     }
 
     if (out_input) {
-        *out_input =
-            string_from(console->pending_input, array_count(console->pending_input));
+        *out_input = string_from(console->pending_input,
+                                 array_count(console->pending_input));
     }
     console->has_pending_input = false;
     return true;

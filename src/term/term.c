@@ -152,8 +152,8 @@ bool term_loop()
 
                 case KEY_EVENT:
                     if (record.Event.KeyEvent.bKeyDown) {
-                        KEY_EVENT_RECORD key = record.Event.KeyEvent;
-                        u8 modifiers = 0;
+                        KEY_EVENT_RECORD key       = record.Event.KeyEvent;
+                        u8               modifiers = 0;
                         if ((key.dwControlKeyState &
                              (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0) {
                             modifiers |= TERM_KEYMOD_CTRL;
@@ -189,14 +189,16 @@ bool term_loop()
                             _term_queue_key_special(TERM_KEY_DELETE, modifiers);
                             break;
                         case VK_BACK:
-                            _term_queue_key_special(TERM_KEY_BACKSPACE, modifiers);
+                            _term_queue_key_special(TERM_KEY_BACKSPACE,
+                                                    modifiers);
                             break;
                         case VK_RETURN:
                             _term_queue_key_special(TERM_KEY_ENTER, modifiers);
                             break;
                         default:
                             if (key.uChar.AsciiChar != 0) {
-                                _term_queue_key_char(key.uChar.AsciiChar, modifiers);
+                                _term_queue_key_char(key.uChar.AsciiChar,
+                                                     modifiers);
                             }
                             break;
                         }
@@ -205,22 +207,25 @@ bool term_loop()
 
                 case MOUSE_EVENT:
                     {
-                        MOUSE_EVENT_RECORD mouse = record.Event.MouseEvent;
+                        MOUSE_EVENT_RECORD mouse   = record.Event.MouseEvent;
                         u8                 buttons = 0;
                         i16                wheel   = 0;
 
-                        if (mouse.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) {
+                        if (mouse.dwButtonState &
+                            FROM_LEFT_1ST_BUTTON_PRESSED) {
                             buttons |= 0x1;
                         }
                         if (mouse.dwButtonState & RIGHTMOST_BUTTON_PRESSED) {
                             buttons |= 0x2;
                         }
-                        if (mouse.dwButtonState & FROM_LEFT_2ND_BUTTON_PRESSED) {
+                        if (mouse.dwButtonState &
+                            FROM_LEFT_2ND_BUTTON_PRESSED) {
                             buttons |= 0x4;
                         }
 
                         if ((mouse.dwEventFlags & MOUSE_WHEELED) != 0) {
-                            wheel = (SHORT)HIWORD(mouse.dwButtonState) > 0 ? 1 : -1;
+                            wheel =
+                                (SHORT)HIWORD(mouse.dwButtonState) > 0 ? 1 : -1;
                         }
 
                         _term_queue_mouse((u16)mouse.dwMousePosition.X,
@@ -270,7 +275,8 @@ internal void _term_raw_enter(void)
     DWORD raw_mode               = mode;
     raw_mode &=
         ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
-    raw_mode |= (ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT);
+    raw_mode |=
+        (ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT);
     raw_mode &= ~(ENABLE_QUICK_EDIT_MODE | ENABLE_INSERT_MODE);
 
     if (!SetConsoleMode(input, raw_mode)) {
@@ -328,8 +334,8 @@ global_variable usize                 g_term_pending_index = 0;
 global_variable char                  g_term_escape_bytes[32];
 global_variable usize                 g_term_escape_count = 0;
 global_variable char                  g_term_test_read_bytes[128];
-global_variable usize                 g_term_test_read_count = 0;
-global_variable usize                 g_term_test_read_index = 0;
+global_variable usize                 g_term_test_read_count   = 0;
+global_variable usize                 g_term_test_read_index   = 0;
 global_variable bool                  g_term_test_read_enabled = false;
 
 //------------------------------------------------------------------------------
@@ -340,10 +346,7 @@ global_variable bool                  g_term_test_read_enabled = false;
 // Queue a plain character key event with no modifier flags.
 //------------------------------------------------------------------------------
 
-internal void _term_queue_key(char c)
-{
-    _term_queue_key_char(c, 0);
-}
+internal void _term_queue_key(char c) { _term_queue_key_char(c, 0); }
 
 //------------------------------------------------------------------------------
 // _term_queue_key_char
@@ -354,7 +357,7 @@ internal void _term_queue_key(char c)
 
 internal void _term_queue_key_char(char c, u8 modifiers)
 {
-    TermEvent event = {0};
+    TermEvent event     = {0};
     event.kind          = TERM_EVENT_KEY;
     event.key           = c;
     event.key_modifiers = modifiers;
@@ -376,7 +379,7 @@ internal void _term_queue_key_char(char c, u8 modifiers)
 
 internal void _term_queue_key_special(TermKeyCode code, u8 modifiers)
 {
-    TermEvent event = {0};
+    TermEvent event     = {0};
     event.kind          = TERM_EVENT_KEY;
     event.key_code      = code;
     event.key_modifiers = modifiers;
@@ -392,10 +395,10 @@ internal void _term_queue_key_special(TermKeyCode code, u8 modifiers)
 internal void _term_queue_mouse(u16 x, u16 y, i16 wheel, u8 buttons)
 {
     TermEvent event;
-    event.kind         = TERM_EVENT_MOUSE;
-    event.mouse.x      = x;
-    event.mouse.y      = y;
-    event.mouse.wheel  = wheel;
+    event.kind          = TERM_EVENT_MOUSE;
+    event.mouse.x       = x;
+    event.mouse.y       = y;
+    event.mouse.wheel   = wheel;
     event.mouse.buttons = buttons;
     _term_queue_event(event);
 }
@@ -424,7 +427,8 @@ internal bool _term_posix_try_read_byte(char* out_c)
     return nread == 1;
 }
 
-internal bool _term_parse_u16_bytes(const char* bytes, usize count, u16* out_value);
+internal bool
+_term_parse_u16_bytes(const char* bytes, usize count, u16* out_value);
 
 //------------------------------------------------------------------------------
 // _term_parse_modifiers
@@ -459,9 +463,8 @@ internal bool _term_parse_modifiers(u16 value, u8* out_modifiers)
 // Decode a CSI key sequence into a structured key event.
 //------------------------------------------------------------------------------
 
-internal bool _term_posix_decode_key_csi(const char* bytes,
-                                         usize       count,
-                                         usize*      out_consumed)
+internal bool
+_term_posix_decode_key_csi(const char* bytes, usize count, usize* out_consumed)
 {
     if (count < 3 || bytes[0] != '\033' || bytes[1] != '[') {
         return false;
@@ -479,38 +482,51 @@ internal bool _term_posix_decode_key_csi(const char* bytes,
         return false;
     }
 
-    char body[32] = {0};
+    char  body[32]   = {0};
     usize body_count = final_pos - 2;
     if (body_count >= sizeof(body)) {
         return false;
     }
     memcpy(body, bytes + 2, body_count);
-    char final = bytes[final_pos];
+    char final            = bytes[final_pos];
 
-    u8 modifiers = 0;
-    TermKeyCode code = TERM_KEY_NONE;
+    u8          modifiers = 0;
+    TermKeyCode code      = TERM_KEY_NONE;
 
     if ((final == 'A' || final == 'B' || final == 'C' || final == 'D' ||
          final == 'H' || final == 'F') &&
         body_count == 0) {
         switch (final) {
-        case 'A': code = TERM_KEY_UP; break;
-        case 'B': code = TERM_KEY_DOWN; break;
-        case 'C': code = TERM_KEY_RIGHT; break;
-        case 'D': code = TERM_KEY_LEFT; break;
-        case 'H': code = TERM_KEY_HOME; break;
-        case 'F': code = TERM_KEY_END; break;
+        case 'A':
+            code = TERM_KEY_UP;
+            break;
+        case 'B':
+            code = TERM_KEY_DOWN;
+            break;
+        case 'C':
+            code = TERM_KEY_RIGHT;
+            break;
+        case 'D':
+            code = TERM_KEY_LEFT;
+            break;
+        case 'H':
+            code = TERM_KEY_HOME;
+            break;
+        case 'F':
+            code = TERM_KEY_END;
+            break;
         }
     } else if ((final == 'A' || final == 'B' || final == 'C' || final == 'D' ||
                 final == 'H' || final == 'F') &&
                body_count > 0) {
-        u16 params[3] = {0};
+        u16   params[3]   = {0};
         usize param_count = 0;
-        usize start = 0;
+        usize start       = 0;
         for (usize i = 0; i <= body_count; i++) {
             if (i == body_count || body[i] == ';') {
                 if (param_count >= ARRAY_COUNT(params) ||
-                    !_term_parse_u16_bytes(body + start, i - start, &params[param_count])) {
+                    !_term_parse_u16_bytes(
+                        body + start, i - start, &params[param_count])) {
                     return false;
                 }
                 param_count++;
@@ -523,21 +539,34 @@ internal bool _term_posix_decode_key_csi(const char* bytes,
         }
 
         switch (final) {
-        case 'A': code = TERM_KEY_UP; break;
-        case 'B': code = TERM_KEY_DOWN; break;
-        case 'C': code = TERM_KEY_RIGHT; break;
-        case 'D': code = TERM_KEY_LEFT; break;
-        case 'H': code = TERM_KEY_HOME; break;
-        case 'F': code = TERM_KEY_END; break;
+        case 'A':
+            code = TERM_KEY_UP;
+            break;
+        case 'B':
+            code = TERM_KEY_DOWN;
+            break;
+        case 'C':
+            code = TERM_KEY_RIGHT;
+            break;
+        case 'D':
+            code = TERM_KEY_LEFT;
+            break;
+        case 'H':
+            code = TERM_KEY_HOME;
+            break;
+        case 'F':
+            code = TERM_KEY_END;
+            break;
         }
     } else if (final == '~') {
-        u16 params[3] = {0};
+        u16   params[3]   = {0};
         usize param_count = 0;
-        usize start = 0;
+        usize start       = 0;
         for (usize i = 0; i <= body_count; i++) {
             if (i == body_count || body[i] == ';') {
                 if (param_count >= ARRAY_COUNT(params) ||
-                    !_term_parse_u16_bytes(body + start, i - start, &params[param_count])) {
+                    !_term_parse_u16_bytes(
+                        body + start, i - start, &params[param_count])) {
                     return false;
                 }
                 param_count++;
@@ -551,11 +580,18 @@ internal bool _term_posix_decode_key_csi(const char* bytes,
 
         switch (params[0]) {
         case 1:
-        case 7: code = TERM_KEY_HOME; break;
+        case 7:
+            code = TERM_KEY_HOME;
+            break;
         case 4:
-        case 8: code = TERM_KEY_END; break;
-        case 3: code = TERM_KEY_DELETE; break;
-        default: return false;
+        case 8:
+            code = TERM_KEY_END;
+            break;
+        case 3:
+            code = TERM_KEY_DELETE;
+            break;
+        default:
+            return false;
         }
     } else {
         return false;
@@ -597,7 +633,8 @@ internal void _term_posix_buffer_pending(const char* bytes, usize count)
 // Parse an unsigned 16-bit integer from an ASCII digit span.
 //------------------------------------------------------------------------------
 
-internal bool _term_parse_u16_bytes(const char* bytes, usize count, u16* out_value)
+internal bool
+_term_parse_u16_bytes(const char* bytes, usize count, u16* out_value)
 {
     u64 value = 0;
     if (count == 0) {
@@ -676,9 +713,8 @@ internal bool _term_posix_decode_mouse_sgr(const char* bytes,
     u16 cx = 0;
     u16 cy = 0;
     if (!_term_parse_u16_bytes(bytes + 3, first_sep - 3, &cb) ||
-        !_term_parse_u16_bytes(bytes + first_sep + 1,
-                               second_sep - first_sep - 1,
-                               &cx) ||
+        !_term_parse_u16_bytes(
+            bytes + first_sep + 1, second_sep - first_sep - 1, &cx) ||
         !_term_parse_u16_bytes(
             bytes + second_sep + 1, final_pos - second_sep - 1, &cy)) {
         return false;
@@ -745,9 +781,8 @@ internal bool _term_posix_decode_mouse_1015(const char* bytes,
     u16 cx = 0;
     u16 cy = 0;
     if (!_term_parse_u16_bytes(bytes + 2, first_sep - 2, &cb) ||
-        !_term_parse_u16_bytes(bytes + first_sep + 1,
-                               second_sep - first_sep - 1,
-                               &cx) ||
+        !_term_parse_u16_bytes(
+            bytes + first_sep + 1, second_sep - first_sep - 1, &cx) ||
         !_term_parse_u16_bytes(
             bytes + second_sep + 1, final_pos - second_sep - 1, &cy)) {
         return false;
@@ -785,9 +820,9 @@ internal bool _term_posix_decode_mouse_x10(const char* bytes,
         return false;
     }
 
-    u8 cb = (u8)bytes[3] - 32;
-    u8 cx = (u8)bytes[4] - 32;
-    u8 cy = (u8)bytes[5] - 32;
+    u8 cb       = (u8)bytes[3] - 32;
+    u8 cx       = (u8)bytes[4] - 32;
+    u8 cy       = (u8)bytes[5] - 32;
 
     u8  buttons = 0;
     i16 wheel   = 0;
@@ -802,10 +837,8 @@ internal bool _term_posix_decode_mouse_x10(const char* bytes,
         buttons = 0x2;
     }
 
-    _term_queue_mouse(cx > 0 ? (u16)(cx - 1) : 0,
-                      cy > 0 ? (u16)(cy - 1) : 0,
-                      wheel,
-                      buttons);
+    _term_queue_mouse(
+        cx > 0 ? (u16)(cx - 1) : 0, cy > 0 ? (u16)(cy - 1) : 0, wheel, buttons);
     *out_consumed = 6;
     return true;
 }
@@ -824,7 +857,7 @@ internal bool _term_posix_swallow_mouse_tail(char first)
     }
 
     char  tail[32];
-    usize count = 0;
+    usize count   = 0;
     tail[count++] = first;
 
     char next;
@@ -905,8 +938,8 @@ internal bool _term_posix_drain_escape_buffer(void)
 
     if (g_term_escape_bytes[1] != '[') {
         _term_queue_key(g_term_escape_bytes[0]);
-        _term_posix_buffer_pending(
-            g_term_escape_bytes + 1, g_term_escape_count - 1);
+        _term_posix_buffer_pending(g_term_escape_bytes + 1,
+                                   g_term_escape_count - 1);
         g_term_escape_count = 0;
         return true;
     }
@@ -922,7 +955,8 @@ internal bool _term_posix_drain_escape_buffer(void)
 
     if (g_term_escape_count >= 3 && g_term_escape_bytes[2] == '<') {
         for (usize i = 3; i < g_term_escape_count; i++) {
-            if (g_term_escape_bytes[i] == 'm' || g_term_escape_bytes[i] == 'M') {
+            if (g_term_escape_bytes[i] == 'm' ||
+                g_term_escape_bytes[i] == 'M') {
                 if (_term_posix_decode_mouse_sgr(
                         g_term_escape_bytes, g_term_escape_count, &consumed)) {
                     _term_posix_shift_escape(consumed);
@@ -933,8 +967,8 @@ internal bool _term_posix_drain_escape_buffer(void)
         return false;
     }
 
-    if (g_term_escape_count >= 3 &&
-        g_term_escape_bytes[2] >= '0' && g_term_escape_bytes[2] <= '9') {
+    if (g_term_escape_count >= 3 && g_term_escape_bytes[2] >= '0' &&
+        g_term_escape_bytes[2] <= '9') {
         for (usize i = 2; i < g_term_escape_count; i++) {
             if (g_term_escape_bytes[i] == 'M') {
                 if (_term_posix_decode_mouse_1015(
@@ -1086,9 +1120,9 @@ internal void _term_raw_key(void)
 
 void _term_test_posix_clear_input_buffers(void)
 {
-    g_term_pending_count = 0;
-    g_term_pending_index = 0;
-    g_term_escape_count  = 0;
+    g_term_pending_count     = 0;
+    g_term_pending_index     = 0;
+    g_term_escape_count      = 0;
     g_term_test_read_count   = 0;
     g_term_test_read_index   = 0;
     g_term_test_read_enabled = false;
@@ -1139,10 +1173,7 @@ bool _term_test_posix_drain_escape_buffer_once(void)
 // Execute one deterministic raw-key step for tests.
 //------------------------------------------------------------------------------
 
-void _term_test_posix_raw_key_once(void)
-{
-    _term_raw_key();
-}
+void _term_test_posix_raw_key_once(void) { _term_raw_key(); }
 
 //------------------------------------------------------------------------------
 
@@ -1388,7 +1419,7 @@ internal void _term_maybe_present(void)
 {
     if (g_cursor_dirty || _term_fb_has_dirty()) {
         _term_fb_present_now();
-        g_cursor_dirty           = false;
+        g_cursor_dirty = false;
     }
 }
 
@@ -1565,8 +1596,8 @@ void term_cursor_goto(int x, int y)
             x = size.width + x;
         }
     }
-    g_cursor_x = x;
-    g_cursor_y = y;
+    g_cursor_x     = x;
+    g_cursor_y     = y;
     g_cursor_dirty = true;
     ++x;
     ++y;
@@ -1673,12 +1704,12 @@ void term_cursor_colour(u32 ink, u32 paper)
     g_cursor_ink   = ink;
     g_cursor_paper = paper;
     g_cursor_dirty = true;
-    u8 ink_r   = (ink >> 16) & 0xFF;
-    u8 ink_g   = (ink >> 8) & 0xFF;
-    u8 ink_b   = (ink >> 0) & 0xFF;
-    u8 paper_r = (paper >> 16) & 0xFF;
-    u8 paper_g = (paper >> 8) & 0xFF;
-    u8 paper_b = (paper >> 0) & 0xFF;
+    u8 ink_r       = (ink >> 16) & 0xFF;
+    u8 ink_g       = (ink >> 8) & 0xFF;
+    u8 ink_b       = (ink >> 0) & 0xFF;
+    u8 paper_r     = (paper >> 16) & 0xFF;
+    u8 paper_g     = (paper >> 8) & 0xFF;
+    u8 paper_b     = (paper >> 0) & 0xFF;
     pr("\x1b[38;2;%d;%d;%dm", ink_r, ink_g, ink_b);
     pr("\x1b[48;2;%d;%d;%dm", paper_r, paper_g, paper_b);
 }

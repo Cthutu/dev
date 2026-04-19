@@ -299,27 +299,27 @@ void term_fb_rect(TermRect rect, u32 ch, u32 ink, u32 paper)
 void term_fb_9slice(TermRect rect, cstr slices, bool fill_centre)
 {
     term_fb_rect_char(term_rect(rect.x, rect.y, 1, 1), slices[0]);
+    term_fb_rect_char(term_rect(rect.x + rect.width - 1, rect.y, 1, 1),
+                      slices[2]);
+    term_fb_rect_char(term_rect(rect.x, rect.y + rect.height - 1, 1, 1),
+                      slices[6]);
     term_fb_rect_char(
-        term_rect(rect.x + rect.width - 1, rect.y, 1, 1), slices[2]);
-    term_fb_rect_char(
-        term_rect(rect.x, rect.y + rect.height - 1, 1, 1), slices[6]);
-    term_fb_rect_char(term_rect(
-                          rect.x + rect.width - 1, rect.y + rect.height - 1, 1, 1),
-                      slices[8]);
+        term_rect(rect.x + rect.width - 1, rect.y + rect.height - 1, 1, 1),
+        slices[8]);
 
     if (rect.width > 2) {
+        term_fb_rect_char(term_rect(rect.x + 1, rect.y, rect.width - 2, 1),
+                          slices[1]);
         term_fb_rect_char(
-            term_rect(rect.x + 1, rect.y, rect.width - 2, 1), slices[1]);
-        term_fb_rect_char(term_rect(
-                              rect.x + 1, rect.y + rect.height - 1, rect.width - 2, 1),
-                          slices[7]);
+            term_rect(rect.x + 1, rect.y + rect.height - 1, rect.width - 2, 1),
+            slices[7]);
     }
     if (rect.height > 2) {
+        term_fb_rect_char(term_rect(rect.x, rect.y + 1, 1, rect.height - 2),
+                          slices[3]);
         term_fb_rect_char(
-            term_rect(rect.x, rect.y + 1, 1, rect.height - 2), slices[3]);
-        term_fb_rect_char(term_rect(
-                              rect.x + rect.width - 1, rect.y + 1, 1, rect.height - 2),
-                          slices[5]);
+            term_rect(rect.x + rect.width - 1, rect.y + 1, 1, rect.height - 2),
+            slices[5]);
     }
 
     if (fill_centre && rect.width > 2 && rect.height > 2) {
@@ -623,8 +623,8 @@ void _term_fb_present_now(void)
     //
     // When a row is complete, the next row is done.
 
-    u16 last_x          = 0;
-    u16 last_y          = 0;
+    u16 last_x = 0;
+    u16 last_y = 0;
 
     if (g_cursor_visible) {
         arena_format(&g_term_arena, "\x1b[?25l");
