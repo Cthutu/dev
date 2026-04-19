@@ -248,7 +248,7 @@ void term_window_done(TermWindow* window) { array_free(window->cells); }
 
 void term_window_clear(const TermWindow* window, u32 ch, u32 ink, u32 paper)
 {
-    TermRect rect = window->rect;
+    TermRect rect = term_rect(0, 0, window->rect.width, window->rect.height);
     term_window_paint_rect(window, rect, ch, ink, paper);
 }
 

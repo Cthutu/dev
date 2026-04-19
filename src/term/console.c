@@ -17,6 +17,8 @@ typedef struct {
     usize input_rows;
     usize visible_output_rows;
     usize max_scroll;
+    int   output_width;
+    bool  show_scrollbar;
 } TermConsoleLayout;
 
 //------------------------------------------------------------------------------
@@ -284,14 +286,14 @@ internal void _term_console_measure_output(const TermConsole* console,
         const u8*        s             = chunk.text.data;
         const u8*        end           = chunk.text.data + chunk.text.count;
         int              col           = 0;
-        u32              current_ink   = console->default_ink;
-        u32              current_paper = console->default_paper;
+        u32              current_ink   = console->output_colour;
+        u32              current_paper = COLOUR_BLACK;
 
         while (s < end) {
             usize sgr_bytes = _term_console_try_parse_sgr(s,
                                                           end,
-                                                          console->default_ink,
-                                                          console->default_paper,
+                                                          console->output_colour,
+                                                          COLOUR_BLACK,
                                                           &current_ink,
                                                           &current_paper);
             if (sgr_bytes != 0) {
@@ -330,6 +332,9 @@ internal void _term_console_measure_output(const TermConsole* console,
             rows++;
             col = 0;
         }
+
+        current_ink   = console->output_colour;
+        current_paper = COLOUR_BLACK;
     }
 
     *out_rows = any ? rows : 0;
@@ -347,29 +352,29 @@ internal usize _term_console_input_rows(const TermConsole* console, int width)
 
 internal void _term_console_draw_output(const TermConsole* console,
                                         usize              start_row,
-                                        usize              visible_rows)
+                                        usize              visible_rows,
+                                        int                width)
 {
     TermWindow* window = console->window;
-    int         width  = (int)window->rect.width;
     if (width <= 0 || visible_rows == 0) {
         return;
     }
 
-    usize row           = 0;
-    int   col           = 0;
-    u32   current_ink   = console->default_ink;
-    u32   current_paper = console->default_paper;
+    usize row = 0;
+    int   col = 0;
 
     for (usize i = 0; i < array_count(console->history); i++) {
         TermConsoleChunk chunk = console->history[i];
         const u8*        s     = chunk.text.data;
         const u8*        end   = chunk.text.data + chunk.text.count;
+        u32              current_ink   = console->output_colour;
+        u32              current_paper = COLOUR_BLACK;
 
         while (s < end) {
             usize sgr_bytes = _term_console_try_parse_sgr(s,
                                                           end,
-                                                          console->default_ink,
-                                                          console->default_paper,
+                                                          console->output_colour,
+                                                          COLOUR_BLACK,
                                                           &current_ink,
                                                           &current_paper);
             if (sgr_bytes != 0) {
@@ -440,13 +445,15 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
         u8 ch = index < array_count(console->prompt)
                     ? console->prompt[index]
                     : console->input[index - array_count(console->prompt)];
+        u32 ink = index < array_count(console->prompt) ? console->prompt_colour
+                                                       : console->input_colour;
         _term_console_put_cell(window,
                                x,
                                y,
                                ch,
                                1,
-                               console->default_ink,
-                               console->default_paper);
+                               ink,
+                               COLOUR_BLACK);
         index++;
         x++;
         if (x >= width) {
@@ -457,10 +464,50 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
 
     if (g_term_focused_console == console && console->input_enabled) {
         g_cursor_visible = true;
-        g_cursor_ink     = console->default_ink;
-        g_cursor_paper   = console->default_paper;
+        g_cursor_ink     = console->input_colour;
+        g_cursor_paper   = COLOUR_BLACK;
         g_cursor_x       = (int)window->rect.x + x;
         g_cursor_y       = (int)window->rect.y + y;
+    }
+}
+
+internal void _term_console_draw_scrollbar(const TermConsole* console,
+                                           TermConsoleLayout   layout)
+{
+    if (!layout.show_scrollbar || layout.visible_output_rows == 0) {
+        return;
+    }
+
+    TermWindow* window = console->window;
+    int         x      = (int)window->rect.width - 1;
+    usize       rows   = layout.visible_output_rows;
+    usize       thumb_height =
+        MAX((rows * rows) / MAX(layout.output_rows, (usize)1), (usize)1);
+    usize thumb_range = rows > thumb_height ? rows - thumb_height : 0;
+    usize thumb_y     = layout.max_scroll > 0
+                            ? ((layout.max_scroll - console->scroll_offset) *
+                               thumb_range) /
+                                  layout.max_scroll
+                            : 0;
+
+    for (usize y = 0; y < rows; y++) {
+        _term_console_put_cell(window,
+                               x,
+                               (int)y,
+                               0x2591,
+                               1,
+                               term_rgb(80, 70, 110),
+                               COLOUR_BLACK);
+    }
+
+    for (usize y = thumb_y; y < thumb_y + thumb_height && y < rows; y++) {
+        _term_console_put_cell(window,
+                               x,
+                               (int)y,
+                               0x2588,
+                               1,
+                               term_rgb(255, 180, 80),
+                               COLOUR_BLACK);
     }
 }
 
@@ -474,8 +521,11 @@ internal TermConsoleLayout _term_console_layout(const TermConsole* console)
         return layout;
     }
 
-    layout.input_rows = _term_console_input_rows(console, width);
-    _term_console_measure_output(console, width, &layout.output_rows);
+    layout.show_scrollbar = console->scroll_offset > 0;
+    layout.output_width   = width - (layout.show_scrollbar ? 1 : 0);
+    layout.output_width   = MAX(layout.output_width, 0);
+    layout.input_rows     = _term_console_input_rows(console, width);
+    _term_console_measure_output(console, layout.output_width, &layout.output_rows);
 
     usize input_start = layout.output_rows;
     if (input_start + layout.input_rows > (usize)height) {
@@ -496,8 +546,7 @@ internal void _term_console_redraw(TermConsole* console)
     int         width  = (int)window->rect.width;
     int         height = (int)window->rect.height;
 
-    term_window_clear(
-        window, ' ', console->default_ink, console->default_paper);
+    term_window_clear(window, ' ', COLOUR_WHITE, COLOUR_BLACK);
 
     if (width <= 0 || height <= 0) {
         term_window_draw(window);
@@ -520,8 +569,11 @@ internal void _term_console_redraw(TermConsole* console)
                                           console->scroll_offset
                                     : 0;
 
-    _term_console_draw_output(
-        console, output_start, layout.visible_output_rows);
+    _term_console_draw_output(console,
+                              output_start,
+                              layout.visible_output_rows,
+                              layout.output_width);
+    _term_console_draw_scrollbar(console, layout);
     _term_console_draw_input(console, input_start);
     term_window_draw(window);
 }
@@ -530,15 +582,14 @@ internal void _term_console_redraw(TermConsole* console)
 
 void term_console_init(TermConsole* console,
                        TermWindow*  window,
-                       u32          default_ink,
-                       u32          default_paper,
                        u32          history_size)
 {
     memset(console, 0, sizeof(*console));
     console->window         = window;
-    console->default_ink    = default_ink;
-    console->default_paper  = default_paper;
     console->history_size   = history_size;
+    console->output_colour  = COLOUR_WHITE;
+    console->prompt_colour  = COLOUR_BRIGHT_CYAN;
+    console->input_colour   = COLOUR_BRIGHT_YELLOW;
     console->input_enabled  = true;
     console->focused        = false;
     console->auto_scroll    = true;
@@ -571,6 +622,24 @@ void term_console_enable_input(TermConsole* console, bool enable)
         term_console_unfocus(console);
         return;
     }
+    _term_console_redraw(console);
+}
+
+void term_console_set_output_colour(TermConsole* console, u32 colour)
+{
+    console->output_colour = colour;
+    _term_console_redraw(console);
+}
+
+void term_console_set_prompt_colour(TermConsole* console, u32 colour)
+{
+    console->prompt_colour = colour;
+    _term_console_redraw(console);
+}
+
+void term_console_set_input_colour(TermConsole* console, u32 colour)
+{
+    console->input_colour = colour;
     _term_console_redraw(console);
 }
 
@@ -664,6 +733,8 @@ void term_console_send_event(TermConsole* console, TermEvent event)
         }
 
         if (event.key == '\r' || event.key == '\n') {
+            console->auto_scroll = true;
+            console->scroll_offset = 0;
             _term_console_set_bytes(
                 &console->pending_input,
                 string_from(console->input, array_count(console->input)));

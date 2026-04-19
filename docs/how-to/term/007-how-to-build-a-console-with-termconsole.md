@@ -35,7 +35,7 @@ int run(int argc, char** argv)
     TermConsole console = {0};
 
     term_window_init(&window, term_rect(0, 0, size.width, size.height));
-    term_console_init(&console, &window, COLOUR_WHITE, COLOUR_BLACK, 256);
+    term_console_init(&console, &window, 256);
     term_console_set_prompt(&console, S("> "));
     term_console_write_cstr(&console, "Console ready");
 

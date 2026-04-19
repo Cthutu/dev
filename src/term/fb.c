@@ -215,6 +215,39 @@ void term_fb_rect(TermRect rect, u32 ch, u32 ink, u32 paper)
     }
 }
 
+void term_fb_9slice(TermRect rect, cstr slices, bool fill_centre)
+{
+    term_fb_rect_char(term_rect(rect.x, rect.y, 1, 1), slices[0]);
+    term_fb_rect_char(
+        term_rect(rect.x + rect.width - 1, rect.y, 1, 1), slices[2]);
+    term_fb_rect_char(
+        term_rect(rect.x, rect.y + rect.height - 1, 1, 1), slices[6]);
+    term_fb_rect_char(term_rect(
+                          rect.x + rect.width - 1, rect.y + rect.height - 1, 1, 1),
+                      slices[8]);
+
+    if (rect.width > 2) {
+        term_fb_rect_char(
+            term_rect(rect.x + 1, rect.y, rect.width - 2, 1), slices[1]);
+        term_fb_rect_char(term_rect(
+                              rect.x + 1, rect.y + rect.height - 1, rect.width - 2, 1),
+                          slices[7]);
+    }
+    if (rect.height > 2) {
+        term_fb_rect_char(
+            term_rect(rect.x, rect.y + 1, 1, rect.height - 2), slices[3]);
+        term_fb_rect_char(term_rect(
+                              rect.x + rect.width - 1, rect.y + 1, 1, rect.height - 2),
+                          slices[5]);
+    }
+
+    if (fill_centre && rect.width > 2 && rect.height > 2) {
+        term_fb_rect_char(
+            term_rect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2),
+            slices[4]);
+    }
+}
+
 void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width)
 {
     const u8* ptr = (const u8*)(*s);

@@ -107,6 +107,7 @@ void term_fb_rect_char(TermRect rect, u32 ch);
 
 // Character painting
 void term_fb_rect(TermRect rect, u32 ch, u32 ink, u32 paper);
+void term_fb_9slice(TermRect rect, cstr slices, bool fill_centre);
 
 // Writing strings
 void term_fb_write_cstr(u16 x, u16 y, cstr string);
@@ -212,9 +213,10 @@ typedef struct {
 
 typedef struct {
     TermWindow* window;
-    u32         default_ink;
-    u32         default_paper;
     u32         history_size;
+    u32         output_colour;
+    u32         prompt_colour;
+    u32         input_colour;
     bool        input_enabled;
     bool        focused;
     bool        has_pending_input;
@@ -228,11 +230,12 @@ typedef struct {
 
 void term_console_init(TermConsole* console,
                        TermWindow*  window,
-                       u32          default_ink,
-                       u32          default_paper,
                        u32          history_size);
 void term_console_done(TermConsole* console);
 void term_console_enable_input(TermConsole* console, bool enable);
+void term_console_set_output_colour(TermConsole* console, u32 colour);
+void term_console_set_prompt_colour(TermConsole* console, u32 colour);
+void term_console_set_input_colour(TermConsole* console, u32 colour);
 void term_console_set_prompt(TermConsole* console, string prompt);
 void term_console_resize(TermConsole* console, TermRect new_rect);
 
