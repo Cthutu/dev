@@ -34,6 +34,25 @@ typedef enum {
     TERM_EVENT_RESIZE,
 } TermEventKind;
 
+typedef enum {
+    TERM_KEY_NONE,
+    TERM_KEY_ENTER,
+    TERM_KEY_BACKSPACE,
+    TERM_KEY_DELETE,
+    TERM_KEY_LEFT,
+    TERM_KEY_RIGHT,
+    TERM_KEY_UP,
+    TERM_KEY_DOWN,
+    TERM_KEY_HOME,
+    TERM_KEY_END,
+} TermKeyCode;
+
+enum {
+    TERM_KEYMOD_CTRL  = 1 << 0,
+    TERM_KEYMOD_ALT   = 1 << 1,
+    TERM_KEYMOD_SHIFT = 1 << 2,
+};
+
 typedef struct {
     u16 x;
     u16 y;
@@ -43,8 +62,10 @@ typedef struct {
 
 typedef struct {
     TermEventKind kind;
+    char          key;
+    TermKeyCode   key_code;
+    u8            key_modifiers;
     union {
-        char           key;
         TermSize       size;
         TermMouseEvent mouse;
     };
@@ -52,6 +73,7 @@ typedef struct {
 
 typedef struct Term {
     TermSize size;
+    u8       key_modifiers;
     Array(TermEvent) event_queue;
     bool initialised;
     bool running;
@@ -62,6 +84,11 @@ void      term_done();
 bool      term_loop();
 TermEvent term_poll_event();
 void      term_cls();
+u8        term_key_modifiers(void);
+bool      term_key_modifier_pressed(u8 modifier);
+bool      term_key_ctrl_pressed(void);
+bool      term_key_alt_pressed(void);
+bool      term_key_shift_pressed(void);
 
 void term_cursor_show();
 void term_cursor_hide();
@@ -222,10 +249,14 @@ typedef struct {
     bool        has_pending_input;
     bool        auto_scroll;
     usize       scroll_offset;
+    usize       input_cursor;
+    isize       input_history_index;
     Array(TermConsoleChunk) history;
+    Array(string)         input_history;
     Array(u8)             prompt;
     Array(u8)             input;
     Array(u8)             pending_input;
+    Array(u8)             input_history_saved;
 } TermConsole;
 
 void term_console_init(TermConsole* console,

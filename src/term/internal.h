@@ -39,5 +39,13 @@ int  _term_wcwidth(u32 ch);
 
 void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width);
 
+#if OS_POSIX
+void _term_test_posix_clear_input_buffers(void);
+void _term_test_posix_set_read_bytes(const char* bytes, usize count);
+void _term_test_posix_set_escape_buffer(const char* bytes, usize count);
+bool _term_test_posix_drain_escape_buffer_once(void);
+void _term_test_posix_raw_key_once(void);
+#endif
+
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------

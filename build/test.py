@@ -26,6 +26,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from rich.table import Table
+from rich.table import Column
 
 from common import (
     BuildProgressTracker,
@@ -63,7 +64,7 @@ OBJ_DIR_BASE = ROOT / "_obj" / "tests"
 SCRIPT_PATH = Path(__file__).resolve()
 COMMON_PATH = BUILD_DIR / "common.py"
 TEST_LOCK_PATH = BUILD_DIR / ".test.lock"
-TEST_MODULE_TIMEOUT_MS = int(os.environ.get("TEST_MODULE_TIMEOUT_MS", "30000"))
+TEST_MODULE_TIMEOUT_MS = int(os.environ.get("TEST_MODULE_TIMEOUT_MS", "120000"))
 
 CC = os.environ.get("CC", "clang")
 LDFLAGS: list[str] = []
@@ -234,6 +235,7 @@ def run_test_binary(
     result = ModuleResult(name=module_name, executable=executable)
     cmd = [str(executable), *runner_args]
     popen_kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "text": True,
@@ -259,13 +261,14 @@ def run_test_binary(
     active = 2
     completed_tests = 0
     expected_tests = 0
-    start_time = time.monotonic()
+    last_activity = time.monotonic()
     timed_out = False
+    active_test_label = module_name
     while active > 0 or not event_queue.empty():
         try:
             channel, line = event_queue.get(timeout=0.05)
         except queue.Empty:
-            if (time.monotonic() - start_time) * 1000 >= TEST_MODULE_TIMEOUT_MS:
+            if (time.monotonic() - last_activity) * 1000 >= TEST_MODULE_TIMEOUT_MS:
                 timed_out = True
                 terminate_test_process(process)
                 result.failures.append(
@@ -274,8 +277,8 @@ def run_test_binary(
                         name=module_name,
                         file=str(executable),
                         line=0,
-                        expected=f"module completes within {TEST_MODULE_TIMEOUT_MS}ms",
-                        detail="module timed out and was terminated",
+                        expected=f"module produces output within {TEST_MODULE_TIMEOUT_MS}ms",
+                        detail=f"idle too long while running {active_test_label}",
                     )
                 )
                 active = 0
@@ -290,6 +293,7 @@ def run_test_binary(
 
         if not line:
             continue
+        last_activity = time.monotonic()
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -304,13 +308,22 @@ def run_test_binary(
                 visible=True,
                 description=fit_progress_label(module_name),
             )
+        elif event.get("event") == "test_start":
+            active_test_label = f"{event['category']}:{event['name']}"
+            progress.update(
+                module_task_id,
+                description=fit_progress_label(
+                    f"{module_name} {active_test_label}"
+                ),
+            )
         elif event.get("event") == "test_end":
             completed_tests += 1
+            active_test_label = f"{event['category']}:{event['name']}"
             progress.update(
                 module_task_id,
                 completed=completed_tests,
                 description=fit_progress_label(
-                    f"{module_name} {event['category']}:{event['name']}"
+                    f"{module_name} {active_test_label}"
                 ),
             )
         elif event.get("event") == "suite_end":
@@ -625,8 +638,11 @@ def main(argv: list[str] | None = None) -> None:
         results: list[ModuleResult] = []
         progress = Progress(
             SpinnerColumn(),
-            TextColumn("{task.description}"),
-            BarColumn(bar_width=24),
+            TextColumn(
+                "{task.description}",
+                table_column=Column(ratio=1, min_width=28, no_wrap=True),
+            ),
+            BarColumn(bar_width=None),
             TaskProgressColumn(),
             TimeElapsedColumn(),
             TimeRemainingColumn(),

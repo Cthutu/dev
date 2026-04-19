@@ -27,6 +27,8 @@ Arena    g_term_arena;
 
 internal void _term_queue_event(TermEvent event);
 internal void _term_queue_mouse(u16 x, u16 y, i16 wheel, u8 buttons);
+internal void _term_queue_key_char(char c, u8 modifiers);
+internal void _term_queue_key_special(TermKeyCode code, u8 modifiers);
 internal void _term_alt_enter();
 internal void _term_alt_leave();
 internal void _term_raw_enter();
@@ -245,10 +247,54 @@ bool term_loop()
 
                 case KEY_EVENT:
                     if (record.Event.KeyEvent.bKeyDown) {
-                        TermEvent event;
-                        event.kind = TERM_EVENT_KEY;
-                        event.key  = record.Event.KeyEvent.uChar.AsciiChar;
-                        _term_queue_event(event);
+                        KEY_EVENT_RECORD key = record.Event.KeyEvent;
+                        u8 modifiers = 0;
+                        if ((key.dwControlKeyState &
+                             (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0) {
+                            modifiers |= TERM_KEYMOD_CTRL;
+                        }
+                        if ((key.dwControlKeyState &
+                             (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0) {
+                            modifiers |= TERM_KEYMOD_ALT;
+                        }
+                        if ((key.dwControlKeyState & SHIFT_PRESSED) != 0) {
+                            modifiers |= TERM_KEYMOD_SHIFT;
+                        }
+
+                        switch (key.wVirtualKeyCode) {
+                        case VK_LEFT:
+                            _term_queue_key_special(TERM_KEY_LEFT, modifiers);
+                            break;
+                        case VK_RIGHT:
+                            _term_queue_key_special(TERM_KEY_RIGHT, modifiers);
+                            break;
+                        case VK_UP:
+                            _term_queue_key_special(TERM_KEY_UP, modifiers);
+                            break;
+                        case VK_DOWN:
+                            _term_queue_key_special(TERM_KEY_DOWN, modifiers);
+                            break;
+                        case VK_HOME:
+                            _term_queue_key_special(TERM_KEY_HOME, modifiers);
+                            break;
+                        case VK_END:
+                            _term_queue_key_special(TERM_KEY_END, modifiers);
+                            break;
+                        case VK_DELETE:
+                            _term_queue_key_special(TERM_KEY_DELETE, modifiers);
+                            break;
+                        case VK_BACK:
+                            _term_queue_key_special(TERM_KEY_BACKSPACE, modifiers);
+                            break;
+                        case VK_RETURN:
+                            _term_queue_key_special(TERM_KEY_ENTER, modifiers);
+                            break;
+                        default:
+                            if (key.uChar.AsciiChar != 0) {
+                                _term_queue_key_char(key.uChar.AsciiChar, modifiers);
+                            }
+                            break;
+                        }
                     }
                     break;
 
@@ -364,14 +410,40 @@ global_variable usize                 g_term_pending_count = 0;
 global_variable usize                 g_term_pending_index = 0;
 global_variable char                  g_term_escape_bytes[32];
 global_variable usize                 g_term_escape_count = 0;
+global_variable char                  g_term_test_read_bytes[128];
+global_variable usize                 g_term_test_read_count = 0;
+global_variable usize                 g_term_test_read_index = 0;
+global_variable bool                  g_term_test_read_enabled = false;
 
 //------------------------------------------------------------------------------
 
 internal void _term_queue_key(char c)
 {
-    TermEvent event;
-    event.kind = TERM_EVENT_KEY;
-    event.key  = c;
+    _term_queue_key_char(c, 0);
+}
+
+internal void _term_queue_key_char(char c, u8 modifiers)
+{
+    TermEvent event = {0};
+    event.kind          = TERM_EVENT_KEY;
+    event.key           = c;
+    event.key_modifiers = modifiers;
+
+    if (c == '\r' || c == '\n') {
+        event.key_code = TERM_KEY_ENTER;
+    } else if (c == 8 || c == 127 || c == 23) {
+        event.key_code = TERM_KEY_BACKSPACE;
+    }
+
+    _term_queue_event(event);
+}
+
+internal void _term_queue_key_special(TermKeyCode code, u8 modifiers)
+{
+    TermEvent event = {0};
+    event.kind          = TERM_EVENT_KEY;
+    event.key_code      = code;
+    event.key_modifiers = modifiers;
     _term_queue_event(event);
 }
 
@@ -388,8 +460,154 @@ internal void _term_queue_mouse(u16 x, u16 y, i16 wheel, u8 buttons)
 
 internal bool _term_posix_try_read_byte(char* out_c)
 {
+    if (g_term_test_read_enabled) {
+        if (g_term_test_read_index < g_term_test_read_count) {
+            *out_c = g_term_test_read_bytes[g_term_test_read_index++];
+            if (g_term_test_read_index == g_term_test_read_count) {
+                g_term_test_read_count = 0;
+                g_term_test_read_index = 0;
+            }
+            return true;
+        }
+        return false;
+    }
+
     int nread = read(STDIN_FILENO, out_c, 1);
     return nread == 1;
+}
+
+internal bool _term_parse_u16_bytes(const char* bytes, usize count, u16* out_value);
+
+internal bool _term_parse_modifiers(u16 value, u8* out_modifiers)
+{
+    if (value < 2 || value > 8) {
+        return false;
+    }
+
+    u8 modifiers = 0;
+    if (value == 2 || value == 4 || value == 6 || value == 8) {
+        modifiers |= TERM_KEYMOD_SHIFT;
+    }
+    if (value == 3 || value == 4 || value == 7 || value == 8) {
+        modifiers |= TERM_KEYMOD_ALT;
+    }
+    if (value == 5 || value == 6 || value == 7 || value == 8) {
+        modifiers |= TERM_KEYMOD_CTRL;
+    }
+
+    *out_modifiers = modifiers;
+    return true;
+}
+
+internal bool _term_posix_decode_key_csi(const char* bytes,
+                                         usize       count,
+                                         usize*      out_consumed)
+{
+    if (count < 3 || bytes[0] != '\033' || bytes[1] != '[') {
+        return false;
+    }
+
+    usize final_pos = 0;
+    for (usize i = 2; i < count; i++) {
+        char final = bytes[i];
+        if (final >= '@' && final <= '~') {
+            final_pos = i;
+            break;
+        }
+    }
+    if (final_pos == 0) {
+        return false;
+    }
+
+    char body[32] = {0};
+    usize body_count = final_pos - 2;
+    if (body_count >= sizeof(body)) {
+        return false;
+    }
+    memcpy(body, bytes + 2, body_count);
+    char final = bytes[final_pos];
+
+    u8 modifiers = 0;
+    TermKeyCode code = TERM_KEY_NONE;
+
+    if ((final == 'A' || final == 'B' || final == 'C' || final == 'D' ||
+         final == 'H' || final == 'F') &&
+        body_count == 0) {
+        switch (final) {
+        case 'A': code = TERM_KEY_UP; break;
+        case 'B': code = TERM_KEY_DOWN; break;
+        case 'C': code = TERM_KEY_RIGHT; break;
+        case 'D': code = TERM_KEY_LEFT; break;
+        case 'H': code = TERM_KEY_HOME; break;
+        case 'F': code = TERM_KEY_END; break;
+        }
+    } else if ((final == 'A' || final == 'B' || final == 'C' || final == 'D' ||
+                final == 'H' || final == 'F') &&
+               body_count > 0) {
+        u16 params[3] = {0};
+        usize param_count = 0;
+        usize start = 0;
+        for (usize i = 0; i <= body_count; i++) {
+            if (i == body_count || body[i] == ';') {
+                if (param_count >= ARRAY_COUNT(params) ||
+                    !_term_parse_u16_bytes(body + start, i - start, &params[param_count])) {
+                    return false;
+                }
+                param_count++;
+                start = i + 1;
+            }
+        }
+
+        if (param_count >= 2) {
+            _term_parse_modifiers(params[1], &modifiers);
+        }
+
+        switch (final) {
+        case 'A': code = TERM_KEY_UP; break;
+        case 'B': code = TERM_KEY_DOWN; break;
+        case 'C': code = TERM_KEY_RIGHT; break;
+        case 'D': code = TERM_KEY_LEFT; break;
+        case 'H': code = TERM_KEY_HOME; break;
+        case 'F': code = TERM_KEY_END; break;
+        }
+    } else if (final == '~') {
+        u16 params[3] = {0};
+        usize param_count = 0;
+        usize start = 0;
+        for (usize i = 0; i <= body_count; i++) {
+            if (i == body_count || body[i] == ';') {
+                if (param_count >= ARRAY_COUNT(params) ||
+                    !_term_parse_u16_bytes(body + start, i - start, &params[param_count])) {
+                    return false;
+                }
+                param_count++;
+                start = i + 1;
+            }
+        }
+
+        if (param_count >= 2) {
+            _term_parse_modifiers(params[1], &modifiers);
+        }
+
+        switch (params[0]) {
+        case 1:
+        case 7: code = TERM_KEY_HOME; break;
+        case 4:
+        case 8: code = TERM_KEY_END; break;
+        case 3: code = TERM_KEY_DELETE; break;
+        default: return false;
+        }
+    } else {
+        return false;
+    }
+
+    if (code == TERM_KEY_NONE) {
+        return false;
+    }
+
+    _term_queue_key_special(code, modifiers);
+    *out_consumed = final_pos + 1;
+    return true;
 }
 
 internal void _term_posix_buffer_pending(const char* bytes, usize count)
@@ -637,12 +855,12 @@ internal bool _term_posix_swallow_mouse_tail(char first)
     return true;
 }
 
-internal bool _term_posix_try_drain_escape(void)
+internal bool _term_posix_drain_escape_buffer(void)
 {
-    char next;
-    while (g_term_escape_count < ARRAY_COUNT(g_term_escape_bytes) &&
-           _term_posix_try_read_byte(&next)) {
-        g_term_escape_bytes[g_term_escape_count++] = next;
+    if (g_term_escape_count > 0 && g_term_escape_bytes[0] != '\033') {
+        _term_posix_buffer_pending(g_term_escape_bytes, g_term_escape_count);
+        g_term_escape_count = 0;
+        return true;
     }
 
     if (g_term_escape_count < 2 || g_term_escape_bytes[0] != '\033') {
@@ -657,6 +875,16 @@ internal bool _term_posix_try_drain_escape(void)
         for (usize i = 2; i < g_term_escape_count; i++) {
             char final = g_term_escape_bytes[i];
             if (final >= '@' && final <= '~') {
+                switch (final) {
+                case 'H':
+                    _term_queue_key_special(TERM_KEY_HOME, 0);
+                    break;
+                case 'F':
+                    _term_queue_key_special(TERM_KEY_END, 0);
+                    break;
+                default:
+                    break;
+                }
                 _term_posix_shift_escape(i + 1);
                 return true;
             }
@@ -705,10 +933,14 @@ internal bool _term_posix_try_drain_escape(void)
                 return true;
             }
         }
-        return false;
     }
 
     if (g_term_escape_count >= 3) {
+        if (_term_posix_decode_key_csi(
+                g_term_escape_bytes, g_term_escape_count, &consumed)) {
+            _term_posix_shift_escape(consumed);
+            return true;
+        }
         for (usize i = 2; i < g_term_escape_count; i++) {
             char final = g_term_escape_bytes[i];
             if (final >= '@' && final <= '~') {
@@ -719,6 +951,16 @@ internal bool _term_posix_try_drain_escape(void)
     }
 
     return false;
+}
+
+internal bool _term_posix_try_drain_escape(void)
+{
+    char next;
+    while (g_term_escape_count < ARRAY_COUNT(g_term_escape_bytes) &&
+           _term_posix_try_read_byte(&next)) {
+        g_term_escape_bytes[g_term_escape_count++] = next;
+    }
+    return _term_posix_drain_escape_buffer();
 }
 
 //------------------------------------------------------------------------------
@@ -798,6 +1040,42 @@ internal void _term_raw_key(void)
     g_term_escape_bytes[0] = first;
     g_term_escape_count    = 1;
     _term_posix_try_drain_escape();
+}
+
+void _term_test_posix_clear_input_buffers(void)
+{
+    g_term_pending_count = 0;
+    g_term_pending_index = 0;
+    g_term_escape_count  = 0;
+    g_term_test_read_count   = 0;
+    g_term_test_read_index   = 0;
+    g_term_test_read_enabled = false;
+}
+
+void _term_test_posix_set_read_bytes(const char* bytes, usize count)
+{
+    count = MIN(count, ARRAY_COUNT(g_term_test_read_bytes));
+    memcpy(g_term_test_read_bytes, bytes, count);
+    g_term_test_read_count   = count;
+    g_term_test_read_index   = 0;
+    g_term_test_read_enabled = true;
+}
+
+void _term_test_posix_set_escape_buffer(const char* bytes, usize count)
+{
+    count = MIN(count, ARRAY_COUNT(g_term_escape_bytes));
+    memcpy(g_term_escape_bytes, bytes, count);
+    g_term_escape_count = count;
+}
+
+bool _term_test_posix_drain_escape_buffer_once(void)
+{
+    return _term_posix_drain_escape_buffer();
+}
+
+void _term_test_posix_raw_key_once(void)
+{
+    _term_raw_key();
 }
 
 //------------------------------------------------------------------------------
@@ -994,10 +1272,37 @@ TermEvent term_poll_event(void)
     if (array_count(g_term.event_queue) > 0) {
         event = g_term.event_queue[0];
         array_delete(g_term.event_queue, 0);
+        if (event.kind == TERM_EVENT_KEY) {
+            g_term.key_modifiers = event.key_modifiers;
+        }
     } else {
         event.kind = TERM_EVENT_NONE;
     }
     return event;
+}
+
+//------------------------------------------------------------------------------
+
+u8 term_key_modifiers(void) { return g_term.key_modifiers; }
+
+bool term_key_modifier_pressed(u8 modifier)
+{
+    return (g_term.key_modifiers & modifier) != 0;
+}
+
+bool term_key_ctrl_pressed(void)
+{
+    return term_key_modifier_pressed(TERM_KEYMOD_CTRL);
+}
+
+bool term_key_alt_pressed(void)
+{
+    return term_key_modifier_pressed(TERM_KEYMOD_ALT);
+}
+
+bool term_key_shift_pressed(void)
+{
+    return term_key_modifier_pressed(TERM_KEYMOD_SHIFT);
 }
 
 //------------------------------------------------------------------------------

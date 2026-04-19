@@ -29,7 +29,7 @@ GREY = "\033[90m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 RICH_CONSOLE = Console(stderr=False)
-PROGRESS_LABEL_WIDTH = 28
+PROGRESS_LABEL_MIN_WIDTH = 28
 
 
 class CommandFailure(RuntimeError):
@@ -228,7 +228,9 @@ def banner(profile: str, items: list[str], noun: str, cc: str) -> None:
     print(colour(bar, CYAN))
 
 
-def fit_progress_label(text: str, width: int = PROGRESS_LABEL_WIDTH) -> str:
+def fit_progress_label(text: str, width: int | None = None) -> str:
+    if width is None:
+        return text
     if width <= 1:
         return text[:width]
     if len(text) > width:
@@ -241,9 +243,9 @@ def create_progress(*, transient: bool = True) -> Progress:
         SpinnerColumn(),
         TextColumn(
             "{task.description}",
-            table_column=Column(width=PROGRESS_LABEL_WIDTH, no_wrap=True),
+            table_column=Column(ratio=1, min_width=PROGRESS_LABEL_MIN_WIDTH, no_wrap=True),
         ),
-        BarColumn(bar_width=24),
+        BarColumn(bar_width=None),
         TaskProgressColumn(),
         TimeElapsedColumn(),
         TimeRemainingColumn(),

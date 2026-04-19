@@ -5,6 +5,7 @@
 //------------------------------------------------------------------------------
 
 #include "internal.h"
+#include <ctype.h>
 
 //------------------------------------------------------------------------------
 
@@ -25,6 +26,169 @@ typedef struct {
 
 internal void _term_console_redraw(TermConsole* console);
 internal TermConsoleLayout _term_console_layout(const TermConsole* console);
+internal void _term_console_load_input(TermConsole* console, string str);
+internal string _term_console_dup_string(string str);
+internal void _term_console_set_bytes(Array(u8)* bytes, string str);
+
+internal bool _term_console_is_word_byte(u8 ch)
+{
+    return isalnum((unsigned char)ch) || ch == '_';
+}
+
+internal void _term_console_insert_byte(TermConsole* console, u8 ch)
+{
+    usize count = array_count(console->input);
+    usize pos   = MIN(console->input_cursor, count);
+
+    array_push(console->input, 0);
+    if (pos < count) {
+        memmove(console->input + pos + 1,
+                console->input + pos,
+                count - pos);
+    }
+    console->input[pos] = ch;
+    console->input_cursor = pos + 1;
+}
+
+internal void _term_console_delete_range(TermConsole* console,
+                                         usize        start,
+                                         usize        end)
+{
+    usize count = array_count(console->input);
+    start       = MIN(start, count);
+    end         = MIN(end, count);
+    if (end <= start) {
+        return;
+    }
+
+    memmove(console->input + start,
+            console->input + end,
+            count - end);
+    __array_count(console->input) -= end - start;
+    console->input_cursor = start;
+}
+
+internal usize _term_console_word_left(const TermConsole* console, usize cursor)
+{
+    usize pos = MIN(cursor, array_count(console->input));
+
+    while (pos > 0 && isspace((unsigned char)console->input[pos - 1])) {
+        pos--;
+    }
+    while (pos > 0 && _term_console_is_word_byte(console->input[pos - 1])) {
+        pos--;
+    }
+    while (pos > 0 && !isspace((unsigned char)console->input[pos - 1]) &&
+           !_term_console_is_word_byte(console->input[pos - 1])) {
+        pos--;
+    }
+
+    return pos;
+}
+
+internal usize _term_console_word_right(const TermConsole* console, usize cursor)
+{
+    usize count = array_count(console->input);
+    usize pos   = MIN(cursor, count);
+
+    if (pos < count && _term_console_is_word_byte(console->input[pos])) {
+        while (pos < count && _term_console_is_word_byte(console->input[pos])) {
+            pos++;
+        }
+    } else if (pos < count && !isspace((unsigned char)console->input[pos])) {
+        while (pos < count && !isspace((unsigned char)console->input[pos]) &&
+               !_term_console_is_word_byte(console->input[pos])) {
+            pos++;
+        }
+    }
+    while (pos < count && isspace((unsigned char)console->input[pos])) {
+        pos++;
+    }
+
+    return pos;
+}
+
+internal void _term_console_load_history_entry(TermConsole* console)
+{
+    if (console->input_history_index < 0) {
+        _term_console_load_input(
+            console,
+            string_from(console->input_history_saved,
+                        array_count(console->input_history_saved)));
+        return;
+    }
+
+    usize index = (usize)console->input_history_index;
+    if (index < array_count(console->input_history)) {
+        _term_console_load_input(console, console->input_history[index]);
+    }
+}
+
+internal void _term_console_history_up(TermConsole* console)
+{
+    usize count = array_count(console->input_history);
+    if (count == 0) {
+        return;
+    }
+
+    if (console->input_history_index < 0) {
+        _term_console_set_bytes(
+            &console->input_history_saved,
+            string_from(console->input, array_count(console->input)));
+        console->input_history_index = (isize)count - 1;
+    } else if (console->input_history_index > 0) {
+        console->input_history_index--;
+    }
+
+    _term_console_load_history_entry(console);
+}
+
+internal void _term_console_history_down(TermConsole* console)
+{
+    if (console->input_history_index < 0) {
+        return;
+    }
+
+    if ((usize)(console->input_history_index + 1) < array_count(console->input_history)) {
+        console->input_history_index++;
+    } else {
+        console->input_history_index = -1;
+    }
+
+    _term_console_load_history_entry(console);
+}
+
+internal void _term_console_load_input(TermConsole* console, string str)
+{
+    _term_console_set_bytes(&console->input, str);
+    console->input_cursor = array_count(console->input);
+}
+
+internal void _term_console_accept_input(TermConsole* console)
+{
+    console->auto_scroll   = true;
+    console->scroll_offset = 0;
+    _term_console_set_bytes(
+        &console->pending_input,
+        string_from(console->input, array_count(console->input)));
+    console->has_pending_input = true;
+
+    if (array_count(console->input) > 0) {
+        string copy = _term_console_dup_string(
+            string_from(console->input, array_count(console->input)));
+        array_push(console->input_history, copy);
+        while (console->history_size > 0 &&
+               array_count(console->input_history) > console->history_size) {
+            FREE(console->input_history[0].data);
+            array_delete(console->input_history, 0);
+        }
+    }
+
+    array_clear(console->input);
+    console->input_cursor        = 0;
+    console->input_history_index = -1;
+    array_clear(console->input_history_saved);
+}
 
 //------------------------------------------------------------------------------
 
@@ -443,6 +607,7 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
     int   x     = 0;
     int   y     = (int)start_row;
     usize total = array_count(console->prompt) + array_count(console->input);
+    usize cursor_total = array_count(console->prompt) + console->input_cursor;
 
     while (index < total && y < (int)window->rect.height) {
         u8 ch = index < array_count(console->prompt)
@@ -458,6 +623,18 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
                                ink,
                                COLOUR_BLACK);
         index++;
+        x++;
+        if (x >= width) {
+            x = 0;
+            y++;
+        }
+    }
+
+    x = 0;
+    y = (int)start_row;
+    for (usize cursor_index = 0;
+         cursor_index < cursor_total && y < (int)window->rect.height;
+         cursor_index++) {
         x++;
         if (x >= width) {
             x = 0;
@@ -597,6 +774,8 @@ void term_console_init(TermConsole* console,
     console->focused        = false;
     console->auto_scroll    = true;
     console->scroll_offset  = 0;
+    console->input_cursor   = 0;
+    console->input_history_index = -1;
     _term_console_redraw(console);
 }
 
@@ -614,6 +793,11 @@ void term_console_done(TermConsole* console)
     array_free(console->prompt);
     array_free(console->input);
     array_free(console->pending_input);
+    for (usize i = 0; i < array_count(console->input_history); i++) {
+        FREE(console->input_history[i].data);
+    }
+    array_free(console->input_history);
+    array_free(console->input_history_saved);
     memset(console, 0, sizeof(*console));
 }
 
@@ -731,24 +915,75 @@ void term_console_send_event(TermConsole* console, TermEvent event)
         return;
 
     case TERM_EVENT_KEY:
+        if ((event.key_modifiers & TERM_KEYMOD_CTRL) != 0 &&
+            (event.key == 'l' || event.key == 'L' || event.key == 12)) {
+            term_console_clear(console);
+            break;
+        }
+
+        if (event.key_code == TERM_KEY_HOME &&
+            (event.key_modifiers & TERM_KEYMOD_CTRL) != 0) {
+            TermConsoleLayout layout = _term_console_layout(console);
+            console->scroll_offset   = layout.max_scroll;
+            console->auto_scroll     = layout.max_scroll == 0;
+            break;
+        }
+
+        if (event.key_code == TERM_KEY_END &&
+            (event.key_modifiers & TERM_KEYMOD_CTRL) != 0) {
+            console->scroll_offset = 0;
+            console->auto_scroll   = true;
+            break;
+        }
+
         if (!console->input_enabled) {
             break;
         }
 
         if (event.key == '\r' || event.key == '\n') {
-            console->auto_scroll = true;
-            console->scroll_offset = 0;
-            _term_console_set_bytes(
-                &console->pending_input,
-                string_from(console->input, array_count(console->input)));
-            console->has_pending_input = true;
-            array_clear(console->input);
-        } else if (event.key == 8 || event.key == 127) {
-            if (array_count(console->input) > 0) {
-                __array_count(console->input)--;
+            _term_console_accept_input(console);
+        } else if ((event.key_code == TERM_KEY_BACKSPACE) ||
+                   (event.key == 8 || event.key == 127)) {
+            if ((event.key_modifiers & TERM_KEYMOD_CTRL) != 0 || event.key == 23) {
+                usize start =
+                    _term_console_word_left(console, console->input_cursor);
+                _term_console_delete_range(
+                    console, start, console->input_cursor);
+            } else if (console->input_cursor > 0) {
+                _term_console_delete_range(
+                    console,
+                    console->input_cursor - 1,
+                    console->input_cursor);
             }
+        } else if (event.key_code == TERM_KEY_DELETE) {
+            if (console->input_cursor < array_count(console->input)) {
+                _term_console_delete_range(
+                    console, console->input_cursor, console->input_cursor + 1);
+            }
+        } else if (event.key_code == TERM_KEY_LEFT) {
+            if ((event.key_modifiers & TERM_KEYMOD_CTRL) != 0) {
+                console->input_cursor =
+                    _term_console_word_left(console, console->input_cursor);
+            } else if (console->input_cursor > 0) {
+                console->input_cursor--;
+            }
+        } else if (event.key_code == TERM_KEY_RIGHT) {
+            if ((event.key_modifiers & TERM_KEYMOD_CTRL) != 0) {
+                console->input_cursor =
+                    _term_console_word_right(console, console->input_cursor);
+            } else if (console->input_cursor < array_count(console->input)) {
+                console->input_cursor++;
+            }
+        } else if (event.key_code == TERM_KEY_HOME) {
+            console->input_cursor = 0;
+        } else if (event.key_code == TERM_KEY_END) {
+            console->input_cursor = array_count(console->input);
+        } else if (event.key_code == TERM_KEY_UP) {
+            _term_console_history_up(console);
+        } else if (event.key_code == TERM_KEY_DOWN) {
+            _term_console_history_down(console);
         } else if ((u8)event.key >= 32) {
-            array_push(console->input, (u8)event.key);
+            _term_console_insert_byte(console, (u8)event.key);
         }
         break;
 

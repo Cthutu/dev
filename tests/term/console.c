@@ -1,7 +1,32 @@
 //> use: core term
 
-#include <term/term.h>
+#include <term/internal.h>
 #include <test.h>
+
+#if OS_POSIX
+internal void _term_test_console_reset_term_state(void)
+{
+    array_free(g_term.event_queue);
+    g_term.event_queue   = NULL;
+    g_term.key_modifiers = 0;
+    _term_test_posix_clear_input_buffers();
+}
+
+internal void _term_test_console_feed_raw_events(TermConsole* console, usize max_steps)
+{
+    for (usize i = 0; i < max_steps; i++) {
+        _term_test_posix_raw_key_once();
+
+        for (;;) {
+            TermEvent event = term_poll_event();
+            if (event.kind == TERM_EVENT_NONE) {
+                break;
+            }
+            term_console_send_event(console, event);
+        }
+    }
+}
+#endif
 
 TEST_CASE(console, write_wrap_reflows_across_rows)
 {
@@ -279,3 +304,308 @@ TEST_CASE(console, truecolour_output_colours_survive_echo_append)
     term_console_done(&console);
     term_window_done(&window);
 }
+
+TEST_CASE(console, left_right_allows_inserting_inside_input)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 12, 2));
+    term_console_init(&console, &window, 16);
+
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'a'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'c'});
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_LEFT});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'b'});
+
+    TEST_ASSERT_EQ(array_count(console.input), 3);
+    TEST_ASSERT_EQ(console.input[0], 'a');
+    TEST_ASSERT_EQ(console.input[1], 'b');
+    TEST_ASSERT_EQ(console.input[2], 'c');
+    TEST_ASSERT_EQ(console.input_cursor, 2);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, ctrl_word_navigation_and_backspace_work)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 24, 2));
+    term_console_init(&console, &window, 16);
+    term_console_write_cstr(&console, "out");
+
+    cstr text = "one two three";
+    for (usize i = 0; text[i] != 0; i++) {
+        term_console_send_event(
+            &console, (TermEvent){.kind = TERM_EVENT_KEY, .key = text[i]});
+    }
+
+    term_console_send_event(&console,
+                            (TermEvent){.kind = TERM_EVENT_KEY,
+                                        .key_code = TERM_KEY_LEFT,
+                                        .key_modifiers = TERM_KEYMOD_CTRL});
+    TEST_ASSERT_EQ(console.input_cursor, 8);
+
+    term_console_send_event(&console,
+                            (TermEvent){.kind = TERM_EVENT_KEY,
+                                        .key_code = TERM_KEY_BACKSPACE,
+                                        .key_modifiers = TERM_KEYMOD_CTRL});
+
+    TEST_ASSERT_EQ(array_count(console.input), 9);
+    TEST_ASSERT_EQ(console.input_cursor, 4);
+    TEST_ASSERT_EQ(console.input[0], 'o');
+    TEST_ASSERT_EQ(console.input[1], 'n');
+    TEST_ASSERT_EQ(console.input[2], 'e');
+    TEST_ASSERT_EQ(console.input[3], ' ');
+    TEST_ASSERT_EQ(console.input[4], 't');
+
+    term_console_send_event(&console,
+                            (TermEvent){.kind = TERM_EVENT_KEY,
+                                        .key_code = TERM_KEY_RIGHT,
+                                        .key_modifiers = TERM_KEYMOD_CTRL});
+    TEST_ASSERT_EQ(console.input_cursor, 9);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, home_end_and_history_navigation_work)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+    string      input   = {0};
+
+    term_window_init(&window, term_rect(0, 0, 16, 3));
+    term_console_init(&console, &window, 16);
+
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'f'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'i'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'r'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 's'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 't'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = '\r'});
+    TEST_ASSERT(term_console_get_input(&console, &input));
+
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 's'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'e'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'c'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'o'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'n'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'd'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = '\r'});
+    TEST_ASSERT(term_console_get_input(&console, &input));
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_UP});
+    TEST_ASSERT_EQ(array_count(console.input), 6);
+    TEST_ASSERT_EQ(console.input[0], 's');
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_UP});
+    TEST_ASSERT_EQ(array_count(console.input), 5);
+    TEST_ASSERT_EQ(console.input[0], 'f');
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_DOWN});
+    TEST_ASSERT_EQ(array_count(console.input), 6);
+    TEST_ASSERT_EQ(console.input[0], 's');
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_HOME});
+    TEST_ASSERT_EQ(console.input_cursor, 0);
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_END});
+    TEST_ASSERT_EQ(console.input_cursor, 6);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, ctrl_home_end_control_history_scroll)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 8, 2));
+    term_console_init(&console, &window, 16);
+    term_console_enable_input(&console, false);
+    term_console_write_cstr(&console, "one");
+    term_console_write_cstr(&console, "two");
+    term_console_write_cstr(&console, "three");
+
+    term_console_send_event(&console,
+                            (TermEvent){.kind = TERM_EVENT_KEY,
+                                        .key_code = TERM_KEY_HOME,
+                                        .key_modifiers = TERM_KEYMOD_CTRL});
+    TEST_ASSERT_EQ(console.scroll_offset, 1);
+    TEST_ASSERT(!console.auto_scroll);
+
+    term_console_send_event(&console,
+                            (TermEvent){.kind = TERM_EVENT_KEY,
+                                        .key_code = TERM_KEY_END,
+                                        .key_modifiers = TERM_KEYMOD_CTRL});
+    TEST_ASSERT_EQ(console.scroll_offset, 0);
+    TEST_ASSERT(console.auto_scroll);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, ctrl_l_clears_output)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 12, 2));
+    term_console_init(&console, &window, 16);
+    term_console_write_cstr(&console, "hello");
+
+    term_console_send_event(&console,
+                            (TermEvent){.kind = TERM_EVENT_KEY,
+                                        .key = 12,
+                                        .key_modifiers = TERM_KEYMOD_CTRL});
+
+    TEST_ASSERT_EQ(array_count(console.history), 0);
+    TEST_ASSERT(console.auto_scroll);
+    TEST_ASSERT_EQ(console.scroll_offset, 0);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, delete_key_removes_character_under_cursor)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 12, 2));
+    term_console_init(&console, &window, 16);
+
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'a'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'b'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'c'});
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_LEFT});
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_LEFT});
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_DELETE});
+
+    TEST_ASSERT_EQ(array_count(console.input), 2);
+    TEST_ASSERT_EQ(console.input[0], 'a');
+    TEST_ASSERT_EQ(console.input[1], 'c');
+    TEST_ASSERT_EQ(console.input_cursor, 1);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, history_down_restores_saved_draft)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+    string      input   = {0};
+
+    term_window_init(&window, term_rect(0, 0, 16, 3));
+    term_console_init(&console, &window, 16);
+
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'f'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'i'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'r'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 's'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 't'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = '\r'});
+    TEST_ASSERT(term_console_get_input(&console, &input));
+
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'd'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'r'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'a'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 'f'});
+    term_console_send_event(&console, (TermEvent){.kind = TERM_EVENT_KEY, .key = 't'});
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_UP});
+    TEST_ASSERT_EQ(array_count(console.input), 5);
+    TEST_ASSERT_EQ(console.input[0], 'f');
+
+    term_console_send_event(
+        &console, (TermEvent){.kind = TERM_EVENT_KEY, .key_code = TERM_KEY_DOWN});
+    TEST_ASSERT_EQ(array_count(console.input), 5);
+    TEST_ASSERT_EQ(console.input[0], 'd');
+    TEST_ASSERT_EQ(console.input[1], 'r');
+    TEST_ASSERT_EQ(console.input[2], 'a');
+    TEST_ASSERT_EQ(console.input[3], 'f');
+    TEST_ASSERT_EQ(console.input[4], 't');
+    TEST_ASSERT_EQ(console.input_cursor, 5);
+
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+#if OS_POSIX
+TEST_CASE(console, posix_raw_ctrl_left_then_text_keeps_console_editable)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 24, 2));
+    term_console_init(&console, &window, 16);
+    _term_test_console_reset_term_state();
+
+    cstr initial = "hello world";
+    for (usize i = 0; initial[i] != 0; i++) {
+        term_console_send_event(
+            &console, (TermEvent){.kind = TERM_EVENT_KEY, .key = initial[i]});
+    }
+
+    _term_test_posix_set_read_bytes("\033[1;5Dxyz", 9);
+    _term_test_console_feed_raw_events(&console, 8);
+
+    TEST_ASSERT_EQ(array_count(console.input), 14);
+    TEST_ASSERT_EQ(console.input_cursor, 9);
+    TEST_ASSERT_EQ(console.input[0], 'h');
+    TEST_ASSERT_EQ(console.input[6], 'x');
+    TEST_ASSERT_EQ(console.input[7], 'y');
+    TEST_ASSERT_EQ(console.input[8], 'z');
+    TEST_ASSERT_EQ(console.input[9], 'w');
+
+    _term_test_console_reset_term_state();
+    term_console_done(&console);
+    term_window_done(&window);
+}
+
+TEST_CASE(console, posix_raw_multiple_modified_arrows_then_text_work_end_to_end)
+{
+    TermWindow  window  = {0};
+    TermConsole console = {0};
+
+    term_window_init(&window, term_rect(0, 0, 24, 2));
+    term_console_init(&console, &window, 16);
+    _term_test_console_reset_term_state();
+
+    cstr initial = "abc def";
+    for (usize i = 0; initial[i] != 0; i++) {
+        term_console_send_event(
+            &console, (TermEvent){.kind = TERM_EVENT_KEY, .key = initial[i]});
+    }
+
+    _term_test_posix_set_read_bytes("\033[1;5D\033[1;5DZ", 13);
+    _term_test_console_feed_raw_events(&console, 10);
+
+    TEST_ASSERT_EQ(array_count(console.input), 8);
+    TEST_ASSERT_EQ(console.input_cursor, 1);
+    TEST_ASSERT_EQ(console.input[0], 'Z');
+    TEST_ASSERT_EQ(console.input[1], 'a');
+    TEST_ASSERT_EQ(console.input[2], 'b');
+    TEST_ASSERT_EQ(console.input[3], 'c');
+
+    _term_test_console_reset_term_state();
+    term_console_done(&console);
+    term_window_done(&window);
+}
+#endif
