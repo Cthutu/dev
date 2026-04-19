@@ -56,13 +56,51 @@ internal bool _log_write_all(int fd, const u8* data, usize len)
     return true;
 }
 
+internal bool _log_repo_tmp_dir(char* buffer, usize buffer_size)
+{
+    cstr source = __FILE__;
+    cstr src_marker = "/src/log/log.c";
+    cstr src_marker_windows = "\\src\\log\\log.c";
+    cstr marker = strstr(source, src_marker);
+
+    if (!marker) {
+        marker = strstr(source, src_marker_windows);
+        src_marker = src_marker_windows;
+    }
+
+    if (!marker) {
+        return false;
+    }
+
+    usize root_len = (usize)(marker - source);
+    int len = snprintf(buffer,
+                       buffer_size,
+                       "%.*s%c_tmp",
+                       (int)root_len,
+                       source,
+#if OS_WINDOWS
+                       '\\'
+#else
+                       '/'
+#endif
+    );
+
+    return len >= 0 && (usize)len < buffer_size;
+}
+
 internal bool _log_ensure_path(Log* log)
 {
+    char tmp_dir[sizeof(log->path)] = {0};
+
     if (!log) {
         return false;
     }
 
-    if (LOG_MKDIR("_tmp") < 0 && errno != EEXIST) {
+    if (!_log_repo_tmp_dir(tmp_dir, sizeof(tmp_dir))) {
+        return false;
+    }
+
+    if (LOG_MKDIR(tmp_dir) < 0 && errno != EEXIST) {
         return false;
     }
 
@@ -71,7 +109,7 @@ internal bool _log_ensure_path(Log* log)
     }
 
 #if OS_WINDOWS
-    UINT result = GetTempFileNameA("_tmp", "log", 0, log->path);
+    UINT result = GetTempFileNameA(tmp_dir, "log", 0, log->path);
     if (result == 0) {
         log->path[0] = 0;
         return false;
@@ -81,7 +119,7 @@ internal bool _log_ensure_path(Log* log)
     int  len  = snprintf(log->path,
                          sizeof(log->path),
                          "%s/%s-XXXXXX",
-                         "_tmp",
+                         tmp_dir,
                          name);
     if (len < 0 || (usize)len >= sizeof(log->path)) {
         log->path[0] = 0;

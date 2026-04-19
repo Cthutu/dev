@@ -26,9 +26,10 @@ run-release *args: python-env
     uv --directory build run python ../build/run.py -r {{args}}
 
 clean:
-    rm -rf _bin _obj
+    rm -rf _*/
     rm -rf build/.venv
     rm -rf build/__pycache__
+    rm -f build/*.lock
 
 alias b := build
 alias br := build-release

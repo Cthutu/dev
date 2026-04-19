@@ -63,3 +63,18 @@ TEST_CASE(window, write_handles_wide_utf8_characters)
 
     term_window_done(&window);
 }
+
+TEST_CASE(window, truecolour_foreground_is_applied)
+{
+    TermWindow window = {0};
+    term_window_init(&window, term_rect(0, 0, 24, 1));
+    term_window_clear(&window, ' ', COLOUR_WHITE, COLOUR_BLACK);
+
+    term_window_write_cstr(&window, 0, 0, "\033[38;2;140;255;180mabc\033[0m");
+
+    TEST_ASSERT_EQ(window.cells[0].ink, term_rgb(140, 255, 180));
+    TEST_ASSERT_EQ(window.cells[1].ink, term_rgb(140, 255, 180));
+    TEST_ASSERT_EQ(window.cells[2].ink, term_rgb(140, 255, 180));
+
+    term_window_done(&window);
+}

@@ -128,9 +128,12 @@ internal void _term_console_apply_sgr(int  params[],
             if (mode == 5 && i + 1 < count) {
                 *target = _term_console_ansi_256_colour(params[++i]);
             } else if (mode == 2 && i + 3 < count) {
-                int r   = CLAMP(params[++i], 0, 255);
-                int g   = CLAMP(params[++i], 0, 255);
-                int b   = CLAMP(params[++i], 0, 255);
+                int raw_r = params[++i];
+                int raw_g = params[++i];
+                int raw_b = params[++i];
+                int r     = CLAMP(raw_r, 0, 255);
+                int g     = CLAMP(raw_g, 0, 255);
+                int b     = CLAMP(raw_b, 0, 255);
                 *target = term_rgb((u8)r, (u8)g, (u8)b);
             }
         }

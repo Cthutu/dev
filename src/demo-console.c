@@ -108,7 +108,7 @@ int run(int argc, char** argv)
                 &console,
                 "\033[38;5;81m[tick %u]\033[0m "
                 "\033[38;5;220m◆\033[0m "
-                "\033[38;5;114m%llu ms elapsed\033[0m",
+                "\033[38;2;140;255;180m%llu ms elapsed\033[0m",
                 tick++,
                 time_duration_to_ms(elapsed));
             next_log = time_add_duration(now, time_from_secs(1));

@@ -254,7 +254,7 @@ TEST_CASE(console, ansi_output_colours_survive_scroll_snap_redraw)
     term_window_done(&window);
 }
 
-TEST_CASE(console, ansi_256_output_colours_survive_echo_append)
+TEST_CASE(console, truecolour_output_colours_survive_echo_append)
 {
     TermWindow  window  = {0};
     TermConsole console = {0};
@@ -264,17 +264,17 @@ TEST_CASE(console, ansi_256_output_colours_survive_echo_append)
     term_console_write_cstr(
         &console,
         "\033[38;5;81m[tick 1]\033[0m \033[38;5;220m◆\033[0m "
-        "\033[38;5;114m1000 ms elapsed\033[0m");
+        "\033[38;2;140;255;180m1000 ms elapsed\033[0m");
     term_console_write_cstr(
         &console,
         "\033[38;5;81m[tick 2]\033[0m \033[38;5;220m◆\033[0m "
-        "\033[38;5;114m2000 ms elapsed\033[0m");
+        "\033[38;2;140;255;180m2000 ms elapsed\033[0m");
     term_console_write_cstr(
         &console,
         "\033[38;5;111mecho\033[0m \033[38;5;246m>\033[0m hello");
 
-    TEST_ASSERT_EQ(window.cells[11].ink, term_rgb(135, 215, 135));
-    TEST_ASSERT_EQ(window.cells[40 + 11].ink, term_rgb(135, 215, 135));
+    TEST_ASSERT_EQ(window.cells[11].ink, term_rgb(140, 255, 180));
+    TEST_ASSERT_EQ(window.cells[40 + 11].ink, term_rgb(140, 255, 180));
 
     term_console_done(&console);
     term_window_done(&window);
