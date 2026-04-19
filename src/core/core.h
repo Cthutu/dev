@@ -473,6 +473,14 @@ void   temp_arena_done();
 Arena* temp_arena();
 void   temp_arena_reset();
 
+//
+// Arena macros
+//
+
+#define ARENA_ALLOC(arena, type) (type*)arena_alloc((arena), sizeof(type))
+#define ARENA_ALLOC_ARRAY(arena, type, count)                                  \
+    (type*)arena_alloc((arena), sizeof(type) * (count))
+
 //------------------------------------------------------------------------------[Mutex]
 
 #if OS_WINDOWS
