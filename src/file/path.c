@@ -419,6 +419,7 @@ internal void _path_simplify_internal(string* path, string skipped_root)
 
     isize best_index        = -1;
     usize best_prefix_count = 0;
+    Arena* scratch          = temp_arena();
 
     for (usize i = 0; i < array_count(g_file_system.roots); ++i) {
         if (skipped_root.count > 0 &&
@@ -426,7 +427,11 @@ internal void _path_simplify_internal(string* path, string skipped_root)
             continue;
         }
 
-        string prefix = g_file_system.roots[i].path;
+        string prefix = path_sys_filename(g_file_system.roots[i].path, scratch);
+        if (prefix.count == 0) {
+            continue;
+        }
+
         if (!_path_root_prefix_matches(*path, prefix)) {
             continue;
         }
@@ -438,10 +443,11 @@ internal void _path_simplify_internal(string* path, string skipped_root)
     }
 
     if (best_index < 0) {
+        temp_arena_reset();
         return;
     }
 
-    FileRoot* root = &g_file_system.roots[best_index];
+    FileRoot* root        = &g_file_system.roots[best_index];
     usize     tail_offset = best_prefix_count;
     if (tail_offset < path->count && path->data[tail_offset] == '/') {
         tail_offset++;
@@ -470,6 +476,7 @@ internal void _path_simplify_internal(string* path, string skipped_root)
 
     FREE(tail);
     path->count = (usize)written;
+    temp_arena_reset();
 }
 
 void _path_simplify(string* path)
