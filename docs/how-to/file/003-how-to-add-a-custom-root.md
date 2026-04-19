@@ -10,10 +10,11 @@ portable paths instead of repeating a longer base path.
 ## Steps
 
 1. Call `file_init()`.
-2. Pick a unique root name.
-3. Build the root target as an agnostic path.
-4. Call `path_add_root(name, path)`.
-5. Use the new root everywhere else as a normal agnostic path.
+2. Register any built-in roots your custom root depends on.
+3. Pick a unique root name.
+4. Build the root target as an agnostic path.
+5. Call `path_add_root(name, path)`.
+6. Use the new root everywhere else as a normal agnostic path.
 
 ## Example
 
@@ -28,6 +29,7 @@ int run(int argc, char** argv)
     UNUSED(argv);
 
     file_init();
+    file_add_home_root();
 
     if (!path_add_root(S("logs"), S("home:/dev/logs"))) {
         prn("failed to add logs root");

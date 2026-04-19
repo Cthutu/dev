@@ -10,11 +10,12 @@ hard-coding host-specific paths.
 ## Steps
 
 1. Call `file_init()` once before using the path API.
-2. Use agnostic paths in the form `root:/path/to/file`.
-3. Use the built-in roots such as `home:/`, `data:/`, `temp:/`, `cfg:/`, `app:/`,
+2. Register only the roots your application needs with the `file_add_*_root()` helpers.
+3. Use agnostic paths in the form `root:/path/to/file`.
+4. Use the built-in roots such as `home:/`, `data:/`, `temp:/`, `cfg:/`, `app:/`,
    and `sys:/`.
-4. Pass those agnostic paths to the file/path helpers.
-5. Call `file_done()` during shutdown.
+5. Pass those agnostic paths to the file/path helpers.
+6. Call `file_done()` during shutdown.
 
 ## Example
 
@@ -29,6 +30,11 @@ int run(int argc, char** argv)
     UNUSED(argv);
 
     file_init();
+    file_add_home_root();
+    file_add_data_root();
+    file_add_temp_root();
+    file_add_cfg_root();
+    file_add_app_root();
 
     string config = S("cfg:/settings.json");
     string asset  = S("data:/splash.txt");
@@ -45,6 +51,11 @@ int run(int argc, char** argv)
 
 ## Notes
 
+- `file_init()` only sets up the file system module itself. It does not add
+  `home`, `data`, `temp`, `cfg`, or `app` automatically.
+- Register only the roots your application wants to expose. For example, if you
+  do not call `file_add_cfg_root()`, then `cfg:/` is not available and no
+  configuration directory is created for that application.
 - `sys:/` is always available. It is the canonical path space used internally.
 - Other roots are shortcuts layered on top of `sys:/` or other agnostic roots.
 - Paths must be absolute and must not contain `.` or `..` components.
