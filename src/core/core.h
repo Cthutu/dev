@@ -626,6 +626,7 @@ void data_unload(Data* data);
 //------------------------------------------------------------------------------[String]
 
 DEF_SLICE(u8) string;
+DEF_SLICE(string) strings;
 
 // Macro to create pr string parameters from a string.
 #define STRINGV(s) (int)((s).count), (s).data
@@ -661,12 +662,46 @@ usize string_line_count(string str);
 
 bool string_equals(string a, string b);
 bool string_equals_cstr(string a, cstr b);
-bool string_split(string  str,
-                  cstr    delimiter,
-                  string* out_left,
-                  string* out_right);
+bool string_split_once(string  str,
+                       cstr    delimiter,
+                       string* out_left,
+                       string* out_right);
 
 bool string_to_u64(string str, u64* out_value);
+
+// Split a string according to a delimiter.  The arena will contain the slice
+// of string slices.  The string slices will not include the delimiter.
+strings string_split(string str, cstr delimiter, Arena* arena);
+
+//------------------------------------------------------------------------------
+// Unicode-aware string functions
+//
+// These functions will ignore ANSI escape codes when calculating character
+// counts and widths, and will properly handle multi-cell unicode characters.
+// They will not modify the string in any way, so the ANSI codes will still be
+// present in the string and will be counted in the byte count, but not in the
+// character count or cell count.
+//
+// These functions will assume that the input string is valid UTF-8.  If the
+// string is not valid UTF-8, the behavior is undefined.
+//
+// The reason cells are a concept is that these strings are intended to be used
+// for output.
+//------------------------------------------------------------------------------
+
+// Return the width of a Unicode character
+usize string_unicode_char_width(u32 codepoint);
+
+// Decode UTF-8 bytes into a codepoint
+usize string_utf8_decode(const u8* bytes, u32* out_codepoint);
+
+// Return the cell count of a string, ignoring ANSI escape codes
+usize string_character_cell_count(string str);
+
+// Convert a string into an array of strings wrapped to a certain width.  This
+// will take into account character width.  The arena will contain the slice of
+// string slices.
+strings string_wrap(string str, Arena* arena, usize width);
 
 //------------------------------------------------------------------------------
 // StringBuilder API

@@ -74,10 +74,10 @@ bool _net_parse_url(cstr url, Net_Endpoint* out_ep)
     string host_str;
     string port_str;
 
-    if (!string_split(url_string, "://", &proto_str, &url_string)) {
+    if (!string_split_once(url_string, "://", &proto_str, &url_string)) {
         return false;
     }
-    if (!string_split(url_string, ":", &host_str, &port_str)) {
+    if (!string_split_once(url_string, ":", &host_str, &port_str)) {
         return false;
     }
 

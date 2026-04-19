@@ -1,0 +1,5 @@
+- [ ] Move the wcwidth function into the core library, removing duplicated effort from term.
+- [ ] Move ANSI code parsing into the core library, removing duplicated effort from term.
+- [ ] Add unit test for the new string functions.
+- [ ] Ensure that we have good unit test coverage for the string routines
+- [ ] Remove string_line_count as it's redundant due to string_split.

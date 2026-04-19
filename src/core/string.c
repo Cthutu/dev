@@ -75,10 +75,10 @@ bool string_equals_cstr(string a, cstr b)
     return string_equals(a, b_str);
 }
 
-bool string_split(string  str,
-                  cstr    delimiter,
-                  string* out_left,
-                  string* out_right)
+bool string_split_once(string  str,
+                       cstr    delimiter,
+                       string* out_left,
+                       string* out_right)
 {
     for (usize i = 0; i < str.count; i++) {
         if (i + strlen(delimiter) > str.count) {
@@ -99,6 +99,20 @@ bool string_split(string  str,
     }
 
     return false;
+}
+
+strings string_split(string str, cstr delimiter, Arena* arena)
+{
+    ArenaSession session;
+    arena_session_init(&session, arena, sizeof(string), sizeof(string));
+
+    string part;
+    while (!string_split_once(str, delimiter, &part, &str)) {
+        ((string*)arena_session_alloc(&session, 1))[0] = part;
+    }
+
+    return (strings){.data  = (string*)arena_session_address(&session),
+                     .count = arena_session_count(&session)};
 }
 
 bool string_to_u64(string str, u64* out_value)

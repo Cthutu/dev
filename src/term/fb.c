@@ -6,7 +6,6 @@
 
 #include "internal.h"
 #include <term/term.h>
-#include <wchar.h>
 
 //------------------------------------------------------------------------------
 
@@ -349,56 +348,34 @@ void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width)
         return;
     }
 
-    u32   ch    = 0;
     usize bytes = 1;
+    if (b0 >= 0x80) {
+        if ((b0 & 0xE0) == 0xC0) {
+            bytes = 2;
+        } else if ((b0 & 0xF0) == 0xE0) {
+            bytes = 3;
+        } else if ((b0 & 0xF8) == 0xF0) {
+            bytes = 4;
+        } else {
+            goto invalid;
+        }
+        for (usize i = 1; i < bytes; i++) {
+            if (ptr[i] == '\0') {
+                goto invalid;
+            }
+        }
+    }
 
-    if (b0 < 0x80) {
-        ch = b0;
-    } else if ((b0 & 0xE0) == 0xC0) {
-        u8 b1 = ptr[1];
-        if (b1 == '\0' || (b1 & 0xC0) != 0x80) {
-            goto invalid;
-        }
-        ch    = ((u32)(b0 & 0x1F) << 6) | (u32)(b1 & 0x3F);
-        bytes = 2;
-        if (ch < 0x80) {
-            goto invalid;
-        }
-    } else if ((b0 & 0xF0) == 0xE0) {
-        u8 b1 = ptr[1];
-        u8 b2 = ptr[2];
-        if (b1 == '\0' || b2 == '\0' || (b1 & 0xC0) != 0x80 ||
-            (b2 & 0xC0) != 0x80) {
-            goto invalid;
-        }
-        ch = ((u32)(b0 & 0x0F) << 12) | ((u32)(b1 & 0x3F) << 6) |
-             (u32)(b2 & 0x3F);
-        bytes = 3;
-        if (ch < 0x800 || (ch >= 0xD800 && ch <= 0xDFFF)) {
-            goto invalid;
-        }
-    } else if ((b0 & 0xF8) == 0xF0) {
-        u8 b1 = ptr[1];
-        u8 b2 = ptr[2];
-        u8 b3 = ptr[3];
-        if (b1 == '\0' || b2 == '\0' || b3 == '\0' || (b1 & 0xC0) != 0x80 ||
-            (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80) {
-            goto invalid;
-        }
-        ch = ((u32)(b0 & 0x07) << 18) | ((u32)(b1 & 0x3F) << 12) |
-             ((u32)(b2 & 0x3F) << 6) | (u32)(b3 & 0x3F);
-        bytes = 4;
-        if (ch < 0x10000 || ch > 0x10FFFF) {
-            goto invalid;
-        }
-    } else {
+    u32 ch;
+    bytes = string_utf8_decode(ptr, &ch);
+    if (ch == 0xFFFD && b0 >= 0x80) {
         goto invalid;
     }
 
     *out_char  = ch;
     *out_bytes = bytes;
 
-    int width  = _term_wcwidth(ch);
+    int width  = (int)string_unicode_char_width(ch);
     if (width <= 0) {
         width = 1;
     }
@@ -497,10 +474,7 @@ void term_fb_write(u16 x, u16 y, string str)
             goto invalid_char;
         }
 
-        width = (usize)_term_wcwidth(ch);
-        if ((int)width <= 0) {
-            width = 1;
-        }
+        width = string_unicode_char_width(ch);
 
         goto process_char;
 
