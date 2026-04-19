@@ -55,6 +55,12 @@ typedef struct {
     int last;
 } TermInterval;
 
+//------------------------------------------------------------------------------
+// _term_bisearch
+//
+// Binary-search a sorted interval table for a Unicode codepoint.
+//------------------------------------------------------------------------------
+
 internal int _term_bisearch(wchar_t ucs, const TermInterval* table, int max)
 {
     int min = 0;
@@ -76,6 +82,12 @@ internal int _term_bisearch(wchar_t ucs, const TermInterval* table, int max)
 
     return 0;
 }
+
+//------------------------------------------------------------------------------
+// _term_wcwidth
+//
+// Return the terminal column width of a Unicode codepoint.
+//------------------------------------------------------------------------------
 
 int _term_wcwidth(u32 ucs)
 {
@@ -178,6 +190,18 @@ global_variable bool   g_term_console_mode_captured = false;
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// term_size_get
+//
+// Query the current terminal dimensions on Windows.
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// term_size_get
+//
+// Query the current terminal dimensions on POSIX systems.
+//------------------------------------------------------------------------------
+
 TermSize term_size_get(void)
 {
     TermSize term_size = {0};
@@ -194,6 +218,13 @@ TermSize term_size_get(void)
     return term_size;
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// _term_platform_init
+//
+// Enable Windows virtual terminal output and seed the initial terminal size and
+// resize event state.
 //------------------------------------------------------------------------------
 
 internal void _term_platform_init()
@@ -216,6 +247,13 @@ internal void _term_platform_init()
     _term_queue_event(event);
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// term_loop
+//
+// Poll Windows terminal input, dispatch resize, key, and mouse events, and
+// present the framebuffer when needed.
 //------------------------------------------------------------------------------
 
 bool term_loop()
@@ -338,6 +376,12 @@ bool term_loop()
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_raw_enter
+//
+// Put the Windows console input handle into raw event mode.
+//------------------------------------------------------------------------------
+
 internal void _term_raw_enter(void)
 {
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
@@ -369,6 +413,12 @@ internal void _term_raw_enter(void)
 
     FlushConsoleInputBuffer(input);
 }
+
+//------------------------------------------------------------------------------
+// _term_raw_leave
+//
+// Restore the original Windows console input mode.
+//------------------------------------------------------------------------------
 
 internal void _term_raw_leave(void)
 {
@@ -417,10 +467,23 @@ global_variable bool                  g_term_test_read_enabled = false;
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_queue_key
+//
+// Queue a plain character key event with no modifier flags.
+//------------------------------------------------------------------------------
+
 internal void _term_queue_key(char c)
 {
     _term_queue_key_char(c, 0);
 }
+
+//------------------------------------------------------------------------------
+// _term_queue_key_char
+//
+// Queue a character key event and infer common special-key codes for control
+// characters such as enter and backspace.
+//------------------------------------------------------------------------------
 
 internal void _term_queue_key_char(char c, u8 modifiers)
 {
@@ -438,6 +501,12 @@ internal void _term_queue_key_char(char c, u8 modifiers)
     _term_queue_event(event);
 }
 
+//------------------------------------------------------------------------------
+// _term_queue_key_special
+//
+// Queue a non-character key event such as arrows, home, or delete.
+//------------------------------------------------------------------------------
+
 internal void _term_queue_key_special(TermKeyCode code, u8 modifiers)
 {
     TermEvent event = {0};
@@ -446,6 +515,12 @@ internal void _term_queue_key_special(TermKeyCode code, u8 modifiers)
     event.key_modifiers = modifiers;
     _term_queue_event(event);
 }
+
+//------------------------------------------------------------------------------
+// _term_queue_mouse
+//
+// Queue a mouse event using terminal cell coordinates and button state.
+//------------------------------------------------------------------------------
 
 internal void _term_queue_mouse(u16 x, u16 y, i16 wheel, u8 buttons)
 {
@@ -457,6 +532,12 @@ internal void _term_queue_mouse(u16 x, u16 y, i16 wheel, u8 buttons)
     event.mouse.buttons = buttons;
     _term_queue_event(event);
 }
+
+//------------------------------------------------------------------------------
+// _term_posix_try_read_byte
+//
+// Read a single byte from stdin or the deterministic test input stream.
+//------------------------------------------------------------------------------
 
 internal bool _term_posix_try_read_byte(char* out_c)
 {
@@ -478,6 +559,12 @@ internal bool _term_posix_try_read_byte(char* out_c)
 
 internal bool _term_parse_u16_bytes(const char* bytes, usize count, u16* out_value);
 
+//------------------------------------------------------------------------------
+// _term_parse_modifiers
+//
+// Convert terminal CSI modifier numbering into term modifier bit flags.
+//------------------------------------------------------------------------------
+
 internal bool _term_parse_modifiers(u16 value, u8* out_modifiers)
 {
     if (value < 2 || value > 8) {
@@ -498,6 +585,12 @@ internal bool _term_parse_modifiers(u16 value, u8* out_modifiers)
     *out_modifiers = modifiers;
     return true;
 }
+
+//------------------------------------------------------------------------------
+// _term_posix_decode_key_csi
+//
+// Decode a CSI key sequence into a structured key event.
+//------------------------------------------------------------------------------
 
 internal bool _term_posix_decode_key_csi(const char* bytes,
                                          usize       count,
@@ -610,6 +703,13 @@ internal bool _term_posix_decode_key_csi(const char* bytes,
     return true;
 }
 
+//------------------------------------------------------------------------------
+// _term_posix_buffer_pending
+//
+// Stash plain bytes that should be emitted as ordinary key input on later raw
+// key ticks.
+//------------------------------------------------------------------------------
+
 internal void _term_posix_buffer_pending(const char* bytes, usize count)
 {
     if (count == 0) {
@@ -623,6 +723,12 @@ internal void _term_posix_buffer_pending(const char* bytes, usize count)
     g_term_pending_count = count;
     g_term_pending_index = 0;
 }
+
+//------------------------------------------------------------------------------
+// _term_parse_u16_bytes
+//
+// Parse an unsigned 16-bit integer from an ASCII digit span.
+//------------------------------------------------------------------------------
 
 internal bool _term_parse_u16_bytes(const char* bytes, usize count, u16* out_value)
 {
@@ -646,6 +752,12 @@ internal bool _term_parse_u16_bytes(const char* bytes, usize count, u16* out_val
     return true;
 }
 
+//------------------------------------------------------------------------------
+// _term_posix_shift_escape
+//
+// Remove consumed bytes from the front of the escape-sequence buffer.
+//------------------------------------------------------------------------------
+
 internal void _term_posix_shift_escape(usize consumed)
 {
     if (consumed >= g_term_escape_count) {
@@ -658,6 +770,12 @@ internal void _term_posix_shift_escape(usize consumed)
             g_term_escape_count - consumed);
     g_term_escape_count -= consumed;
 }
+
+//------------------------------------------------------------------------------
+// _term_posix_decode_mouse_sgr
+//
+// Decode an SGR mouse report sequence.
+//------------------------------------------------------------------------------
 
 internal bool _term_posix_decode_mouse_sgr(const char* bytes,
                                            usize       count,
@@ -718,6 +836,12 @@ internal bool _term_posix_decode_mouse_sgr(const char* bytes,
     *out_consumed = final_pos + 1;
     return true;
 }
+
+//------------------------------------------------------------------------------
+// _term_posix_decode_mouse_1015
+//
+// Decode a legacy UTF-8 extended mouse report in xterm 1015 format.
+//------------------------------------------------------------------------------
 
 internal bool _term_posix_decode_mouse_1015(const char* bytes,
                                             usize       count,
@@ -780,6 +904,12 @@ internal bool _term_posix_decode_mouse_1015(const char* bytes,
     return true;
 }
 
+//------------------------------------------------------------------------------
+// _term_posix_decode_mouse_x10
+//
+// Decode an X10 mouse report sequence.
+//------------------------------------------------------------------------------
+
 internal bool _term_posix_decode_mouse_x10(const char* bytes,
                                            usize       count,
                                            usize*      out_consumed)
@@ -812,6 +942,13 @@ internal bool _term_posix_decode_mouse_x10(const char* bytes,
     *out_consumed = 6;
     return true;
 }
+
+//------------------------------------------------------------------------------
+// _term_posix_swallow_mouse_tail
+//
+// Detect and discard stray mouse-sequence tail fragments so they do not leak
+// into ordinary key input.
+//------------------------------------------------------------------------------
 
 internal bool _term_posix_swallow_mouse_tail(char first)
 {
@@ -854,6 +991,13 @@ internal bool _term_posix_swallow_mouse_tail(char first)
 
     return true;
 }
+
+//------------------------------------------------------------------------------
+// _term_posix_drain_escape_buffer
+//
+// Consume one complete buffered escape sequence, buffering leftovers when they
+// resolve to plain input.
+//------------------------------------------------------------------------------
 
 internal bool _term_posix_drain_escape_buffer(void)
 {
@@ -953,6 +1097,12 @@ internal bool _term_posix_drain_escape_buffer(void)
     return false;
 }
 
+//------------------------------------------------------------------------------
+// _term_posix_try_drain_escape
+//
+// Extend the escape buffer from stdin and attempt to decode one sequence.
+//------------------------------------------------------------------------------
+
 internal bool _term_posix_try_drain_escape(void)
 {
     char next;
@@ -983,6 +1133,12 @@ TermSize term_size_get(void)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_raw_enter
+//
+// Put the POSIX terminal into raw mode and clear buffered input state.
+//------------------------------------------------------------------------------
+
 internal void _term_raw_enter(void)
 {
     tcgetattr(STDIN_FILENO, &g_term_original_tios);
@@ -1003,10 +1159,23 @@ internal void _term_raw_enter(void)
     g_term_escape_count  = 0;
 }
 
+//------------------------------------------------------------------------------
+// _term_raw_leave
+//
+// Restore the original POSIX terminal mode.
+//------------------------------------------------------------------------------
+
 internal void _term_raw_leave(void)
 {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_term_original_tios);
 }
+
+//------------------------------------------------------------------------------
+// _term_raw_key
+//
+// Read and decode one unit of POSIX raw input, handling buffered plain bytes
+// and escape sequences.
+//------------------------------------------------------------------------------
 
 internal void _term_raw_key(void)
 {
@@ -1042,6 +1211,12 @@ internal void _term_raw_key(void)
     _term_posix_try_drain_escape();
 }
 
+//------------------------------------------------------------------------------
+// _term_test_posix_clear_input_buffers
+//
+// Reset deterministic POSIX test input state.
+//------------------------------------------------------------------------------
+
 void _term_test_posix_clear_input_buffers(void)
 {
     g_term_pending_count = 0;
@@ -1052,6 +1227,12 @@ void _term_test_posix_clear_input_buffers(void)
     g_term_test_read_enabled = false;
 }
 
+//------------------------------------------------------------------------------
+// _term_test_posix_set_read_bytes
+//
+// Seed the deterministic POSIX test input stream.
+//------------------------------------------------------------------------------
+
 void _term_test_posix_set_read_bytes(const char* bytes, usize count)
 {
     count = MIN(count, ARRAY_COUNT(g_term_test_read_bytes));
@@ -1061,6 +1242,12 @@ void _term_test_posix_set_read_bytes(const char* bytes, usize count)
     g_term_test_read_enabled = true;
 }
 
+//------------------------------------------------------------------------------
+// _term_test_posix_set_escape_buffer
+//
+// Seed the escape buffer directly for deterministic decoder tests.
+//------------------------------------------------------------------------------
+
 void _term_test_posix_set_escape_buffer(const char* bytes, usize count)
 {
     count = MIN(count, ARRAY_COUNT(g_term_escape_bytes));
@@ -1068,10 +1255,22 @@ void _term_test_posix_set_escape_buffer(const char* bytes, usize count)
     g_term_escape_count = count;
 }
 
+//------------------------------------------------------------------------------
+// _term_test_posix_drain_escape_buffer_once
+//
+// Execute a single deterministic escape-buffer drain step for tests.
+//------------------------------------------------------------------------------
+
 bool _term_test_posix_drain_escape_buffer_once(void)
 {
     return _term_posix_drain_escape_buffer();
 }
+
+//------------------------------------------------------------------------------
+// _term_test_posix_raw_key_once
+//
+// Execute one deterministic raw-key step for tests.
+//------------------------------------------------------------------------------
 
 void _term_test_posix_raw_key_once(void)
 {
@@ -1080,11 +1279,23 @@ void _term_test_posix_raw_key_once(void)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_on_winch
+//
+// Signal handler that marks terminal size as stale after SIGWINCH.
+//------------------------------------------------------------------------------
+
 internal void _term_on_winch(int sig)
 {
     UNUSED(sig);
     g_term_resize_signal = 1;
 }
+
+//------------------------------------------------------------------------------
+// _term_install_resize_handler
+//
+// Install the SIGWINCH resize handler used by the term loop.
+//------------------------------------------------------------------------------
 
 internal void _term_install_resize_handler(void)
 {
@@ -1096,6 +1307,12 @@ internal void _term_install_resize_handler(void)
     sigaction(SIGWINCH, &sa, NULL);
 }
 
+//------------------------------------------------------------------------------
+// _term_remove_resize_handler
+//
+// Restore the default SIGWINCH handler.
+//------------------------------------------------------------------------------
+
 internal void _term_remove_resize_handler(void)
 {
     struct sigaction sa;
@@ -1104,6 +1321,13 @@ internal void _term_remove_resize_handler(void)
     sigaction(SIGWINCH, &sa, NULL);
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// _term_platform_init
+//
+// Initialise POSIX-specific signal handling and schedule the initial resize
+// event.
 //------------------------------------------------------------------------------
 
 internal void _term_platform_init(void)
@@ -1116,6 +1340,13 @@ internal void _term_platform_init(void)
     g_term_resize_signal = 1;
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// term_loop
+//
+// Poll POSIX terminal input, handle resizes, and present the framebuffer when
+// needed.
 //------------------------------------------------------------------------------
 
 bool term_loop(void)
@@ -1145,6 +1376,13 @@ bool term_loop(void)
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// dump_term_size
+//
+// Print a formatted summary of the current terminal size using normal terminal
+// output.
+//------------------------------------------------------------------------------
+
 void dump_term_size(void)
 {
     prn(ANSI_YELLOW "┌──────────────────┬──────────┐");
@@ -1156,6 +1394,13 @@ void dump_term_size(void)
         g_term.size.height);
     prn(ANSI_YELLOW "└──────────────────┴──────────┘");
 }
+
+//------------------------------------------------------------------------------
+// dump_term_size_raw
+//
+// Print a formatted summary of the current terminal size using explicit cursor
+// movement.
+//------------------------------------------------------------------------------
 
 void dump_term_size_raw(void)
 {
@@ -1175,6 +1420,12 @@ void dump_term_size_raw(void)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_queue_event
+//
+// Append an event to the shared terminal event queue.
+//------------------------------------------------------------------------------
+
 internal void _term_queue_event(TermEvent event)
 {
     array_push(g_term.event_queue, event);
@@ -1182,10 +1433,22 @@ internal void _term_queue_event(TermEvent event)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_alt_enter
+//
+// Enter the terminal alternate screen and enable mouse reporting.
+//------------------------------------------------------------------------------
+
 internal void _term_alt_enter(void)
 {
     pr("\x1b[?1049h\x1b[?1007l\x1b[?1002h\x1b[?1006h");
 }
+
+//------------------------------------------------------------------------------
+// _term_alt_leave
+//
+// Disable mouse reporting and leave the terminal alternate screen.
+//------------------------------------------------------------------------------
 
 internal void _term_alt_leave(void)
 {
@@ -1194,12 +1457,25 @@ internal void _term_alt_leave(void)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_start
+//
+// Perform platform-specific startup, enter the alternate screen, and enable raw
+// input handling.
+//------------------------------------------------------------------------------
+
 internal void _term_start(void)
 {
     _term_platform_init();
     _term_alt_enter();
     _term_raw_enter();
 }
+
+//------------------------------------------------------------------------------
+// _term_stop
+//
+// Tear down raw input, framebuffer state, and alternate-screen state.
+//------------------------------------------------------------------------------
 
 internal void _term_stop(void)
 {
@@ -1211,6 +1487,13 @@ internal void _term_stop(void)
     arena_done(&g_term_arena);
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// _term_check_resize
+//
+// Detect a terminal size change and queue a resize event when dimensions have
+// changed.
 //------------------------------------------------------------------------------
 
 internal void _term_check_resize()
@@ -1227,6 +1510,13 @@ internal void _term_check_resize()
     }
 }
 
+//------------------------------------------------------------------------------
+// _term_maybe_present
+//
+// Present the framebuffer when either cursor state or framebuffer contents are
+// dirty.
+//------------------------------------------------------------------------------
+
 internal void _term_maybe_present(void)
 {
     if (g_cursor_dirty || _term_fb_has_dirty()) {
@@ -1235,6 +1525,12 @@ internal void _term_maybe_present(void)
     }
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// term_init
+//
+// Initialise the term module and enter terminal control mode.
 //------------------------------------------------------------------------------
 
 void term_init(void)
@@ -1258,12 +1554,31 @@ void term_init(void)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// term_done
+//
+// Request shutdown of the term loop.
+//------------------------------------------------------------------------------
+
 void term_done(void) { g_term.running = false; }
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// term_cls
+//
+// Clear the real host terminal screen and scrollback.
+//------------------------------------------------------------------------------
+
 void term_cls(void) { pr("\x1b[2J\x1b[3J\x1b[H"); }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// term_poll_event
+//
+// Pop the next queued terminal event, returning `TERM_EVENT_NONE` when no
+// events are pending.
 //------------------------------------------------------------------------------
 
 TermEvent term_poll_event(void)
@@ -1283,28 +1598,65 @@ TermEvent term_poll_event(void)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// term_key_modifiers
+//
+// Return the modifier bits attached to the most recently polled key event.
+//------------------------------------------------------------------------------
+
 u8 term_key_modifiers(void) { return g_term.key_modifiers; }
+
+//------------------------------------------------------------------------------
+// term_key_modifier_pressed
+//
+// Test whether a modifier bit was present on the most recently polled key
+// event.
+//------------------------------------------------------------------------------
 
 bool term_key_modifier_pressed(u8 modifier)
 {
     return (g_term.key_modifiers & modifier) != 0;
 }
 
+//------------------------------------------------------------------------------
+// term_key_ctrl_pressed
+//
+// Test whether Ctrl was present on the most recently polled key event.
+//------------------------------------------------------------------------------
+
 bool term_key_ctrl_pressed(void)
 {
     return term_key_modifier_pressed(TERM_KEYMOD_CTRL);
 }
+
+//------------------------------------------------------------------------------
+// term_key_alt_pressed
+//
+// Test whether Alt was present on the most recently polled key event.
+//------------------------------------------------------------------------------
 
 bool term_key_alt_pressed(void)
 {
     return term_key_modifier_pressed(TERM_KEYMOD_ALT);
 }
 
+//------------------------------------------------------------------------------
+// term_key_shift_pressed
+//
+// Test whether Shift was present on the most recently polled key event.
+//------------------------------------------------------------------------------
+
 bool term_key_shift_pressed(void)
 {
     return term_key_modifier_pressed(TERM_KEYMOD_SHIFT);
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// term_cursor_show
+//
+// Show the host terminal cursor and mark cursor state dirty.
 //------------------------------------------------------------------------------
 
 void term_cursor_show(void)
@@ -1314,6 +1666,12 @@ void term_cursor_show(void)
     g_cursor_dirty   = true;
 }
 
+//------------------------------------------------------------------------------
+// term_cursor_hide
+//
+// Hide the host terminal cursor and mark cursor state dirty.
+//------------------------------------------------------------------------------
+
 void term_cursor_hide(void)
 {
     pr("\x1b[?25l");
@@ -1321,6 +1679,12 @@ void term_cursor_hide(void)
     g_cursor_dirty   = true;
 }
 
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// term_cursor_goto
+//
+// Move the host terminal cursor to an absolute cell position.
 //------------------------------------------------------------------------------
 
 void term_cursor_goto(int x, int y)
@@ -1342,6 +1706,12 @@ void term_cursor_goto(int x, int y)
     pr("\x1b[%d;%dH", y, x);
 }
 
+//------------------------------------------------------------------------------
+// term_cursor_move
+//
+// Move the host terminal cursor by a relative delta.
+//------------------------------------------------------------------------------
+
 void term_cursor_move(int dx, int dy)
 {
     if (dy > 0) {
@@ -1357,7 +1727,19 @@ void term_cursor_move(int dx, int dy)
     }
 }
 
+//------------------------------------------------------------------------------
+// term_cursor_home
+//
+// Move the host terminal cursor to the home position.
+//------------------------------------------------------------------------------
+
 void term_cursor_home(void) { pr("\x1b[H"); }
+
+//------------------------------------------------------------------------------
+// term_cursor_up
+//
+// Move the host terminal cursor up by the given number of rows.
+//------------------------------------------------------------------------------
 
 void term_cursor_up(int delta)
 {
@@ -1368,6 +1750,12 @@ void term_cursor_up(int delta)
     }
 }
 
+//------------------------------------------------------------------------------
+// term_cursor_down
+//
+// Move the host terminal cursor down by the given number of rows.
+//------------------------------------------------------------------------------
+
 void term_cursor_down(int delta)
 {
     if (delta < 0) {
@@ -1376,6 +1764,12 @@ void term_cursor_down(int delta)
         pr("\x1b[%dB", delta);
     }
 }
+
+//------------------------------------------------------------------------------
+// term_cursor_right
+//
+// Move the host terminal cursor right by the given number of columns.
+//------------------------------------------------------------------------------
 
 void term_cursor_right(int delta)
 {
@@ -1386,6 +1780,12 @@ void term_cursor_right(int delta)
     }
 }
 
+//------------------------------------------------------------------------------
+// term_cursor_left
+//
+// Move the host terminal cursor left by the given number of columns.
+//------------------------------------------------------------------------------
+
 void term_cursor_left(int delta)
 {
     if (delta < 0) {
@@ -1394,6 +1794,12 @@ void term_cursor_left(int delta)
         pr("\x1b[%dD", delta);
     }
 }
+
+//------------------------------------------------------------------------------
+// term_cursor_colour
+//
+// Set the host terminal cursor colours and mark cursor state dirty.
+//------------------------------------------------------------------------------
 
 void term_cursor_colour(u32 ink, u32 paper)
 {

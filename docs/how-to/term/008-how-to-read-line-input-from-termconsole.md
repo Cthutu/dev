@@ -11,7 +11,7 @@ user presses ENTER.
 ## Steps
 
 1. Build your `TermConsole`.
-2. Pass key events into `term_console_send_event()`.
+2. Pass terminal events into `term_console_send_event()`.
 3. Call `term_console_get_input()` each frame.
 4. Use the returned `string` immediately or copy it elsewhere if you need to
    keep it.
@@ -66,6 +66,8 @@ int run(int argc, char** argv)
 - `term_console_get_input()` returns `true` once per accepted line.
 - The returned `string` points into console-owned storage and remains valid
   until the next accepted line or `term_console_done()`.
+- `ENTER` accepts the current line and also snaps the console view back to the
+  latest output if the user had scrolled up.
 - [demo-console.c](/home/matt/dev/src/demo-console.c) combines input echoing
   with periodic output.
 

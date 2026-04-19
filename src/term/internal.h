@@ -36,6 +36,20 @@ enum { TERM_FB_CHAR_WIDE_TAIL = 0xFFFFFFFFu };
 bool _term_fb_has_dirty(void);
 void _term_fb_present_now(void);
 int  _term_wcwidth(u32 ch);
+u32  _term_ansi_palette(int index);
+u32  _term_ansi_256_colour(int index);
+void _term_apply_sgr(int  params[],
+                     int  count,
+                     u32  base_ink,
+                     u32  base_paper,
+                     u32* io_ink,
+                     u32* io_paper);
+usize _term_try_parse_sgr(const u8* s,
+                          const u8* end,
+                          u32       base_ink,
+                          u32       base_paper,
+                          u32*      io_ink,
+                          u32*      io_paper);
 
 void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width);
 

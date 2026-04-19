@@ -8,6 +8,8 @@
 
 //------------------------------------------------------------------------------
 // term_rect
+//
+// Construct a rectangle directly from an origin and size.
 //------------------------------------------------------------------------------
 
 TermRect term_rect(u16 x, u16 y, u16 width, u16 height)
@@ -22,6 +24,8 @@ TermRect term_rect(u16 x, u16 y, u16 width, u16 height)
 
 //------------------------------------------------------------------------------
 // term_rect_from_points
+//
+// Construct a rectangle from two inclusive corner points.
 //------------------------------------------------------------------------------
 
 TermRect term_rect_from_points(u16 x0, u16 y0, u16 x1, u16 y1)
@@ -36,6 +40,8 @@ TermRect term_rect_from_points(u16 x0, u16 y0, u16 x1, u16 y1)
 
 //------------------------------------------------------------------------------
 // term_rect_union
+//
+// Return the smallest rectangle that fully contains both inputs.
 //------------------------------------------------------------------------------
 
 TermRect term_rect_union(TermRect a, TermRect b)
@@ -49,6 +55,8 @@ TermRect term_rect_union(TermRect a, TermRect b)
 
 //------------------------------------------------------------------------------
 // term_rect_intersection
+//
+// Return the overlapping region shared by both rectangles.
 //------------------------------------------------------------------------------
 
 TermRect term_rect_intersection(TermRect a, TermRect b)
@@ -65,6 +73,8 @@ TermRect term_rect_intersection(TermRect a, TermRect b)
 
 //------------------------------------------------------------------------------
 // term_rect_equals
+//
+// Test whether two rectangles have identical origin and size.
 //------------------------------------------------------------------------------
 
 bool term_rect_equals(TermRect a, TermRect b)
@@ -75,6 +85,8 @@ bool term_rect_equals(TermRect a, TermRect b)
 
 //------------------------------------------------------------------------------
 // term_rect_contains
+//
+// Test whether a point lies within the rectangle bounds.
 //------------------------------------------------------------------------------
 
 bool term_rect_contains(TermRect rect, u16 x, u16 y)
@@ -85,6 +97,8 @@ bool term_rect_contains(TermRect rect, u16 x, u16 y)
 
 //------------------------------------------------------------------------------
 // term_rect_overlaps
+//
+// Test whether two rectangles overlap with positive shared area.
 //------------------------------------------------------------------------------
 
 bool term_rect_overlaps(TermRect a, TermRect b)
@@ -95,6 +109,8 @@ bool term_rect_overlaps(TermRect a, TermRect b)
 
 //------------------------------------------------------------------------------
 // term_rect_is_empty
+//
+// Test whether a rectangle has zero width or height.
 //------------------------------------------------------------------------------
 
 bool term_rect_is_empty(TermRect rect)
@@ -104,6 +120,9 @@ bool term_rect_is_empty(TermRect rect)
 
 //------------------------------------------------------------------------------
 // term_rect_clip
+//
+// Clip rectangle `a` to rectangle `b`, returning both the clipped rectangle and
+// its local offset relative to `a`.
 //------------------------------------------------------------------------------
 
 bool term_rect_clip(TermRect  a,

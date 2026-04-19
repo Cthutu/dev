@@ -12,7 +12,8 @@ scrollable output history with an editable input line.
 1. Call `term_init()`.
 2. Query the initial size with `term_size_get()`.
 3. Create a `TermWindow` that matches that size.
-4. Initialise `TermConsole` with the window and your default colours.
+4. Initialise `TermConsole` with the window, then optionally set prompt, output,
+   and input colours.
 5. Forward every `TermEvent` into `term_console_send_event()`.
 6. Let `term_loop()` present the pending framebuffer changes.
 
@@ -55,9 +56,14 @@ int run(int argc, char** argv)
 ## Notes
 
 - `term_console_send_event()` handles both key input and `TERM_EVENT_RESIZE`.
+- `term_console_send_event()` also handles mouse wheel scrolling and implicitly
+  moves console focus to the console receiving the event.
 - `term_console_resize()` calls `term_window_resize()` underneath, so the
   backing window stays in sync with the terminal.
 - `history_size` limits how many output chunks the console keeps.
+- Use `term_console_set_output_colour()`, `term_console_set_prompt_colour()`,
+  and `term_console_set_input_colour()` if you want colours other than the
+  default white-on-black console output.
 
 ## Related files
 

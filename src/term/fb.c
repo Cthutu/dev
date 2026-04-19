@@ -10,6 +10,13 @@
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_fb_resize
+//
+// Resize the framebuffer backing arrays, preserving any overlapping region and
+// clearing newly exposed cells.
+//------------------------------------------------------------------------------
+
 void _term_fb_resize(u16 width, u16 height)
 {
     TermSize size                 = g_term_fb_size;
@@ -53,6 +60,12 @@ void _term_fb_resize(u16 width, u16 height)
     g_term_fb_size.height = height;
 }
 
+//------------------------------------------------------------------------------
+// _term_fb_done
+//
+// Release the framebuffer backing arrays.
+//------------------------------------------------------------------------------
+
 void _term_fb_done(void)
 {
     array_free(g_term_fb_chars);
@@ -63,15 +76,33 @@ void _term_fb_done(void)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// term_rgb
+//
+// Construct an opaque RGB colour value.
+//------------------------------------------------------------------------------
+
 u32 term_rgb(u8 r, u8 g, u8 b)
 {
     return (0xFF << 24) | (r << 16) | (g << 8) | (b << 0);
 }
 
+//------------------------------------------------------------------------------
+// term_rgba
+//
+// Construct an RGBA colour value.
+//------------------------------------------------------------------------------
+
 u32 term_rgba(u8 r, u8 g, u8 b, u8 a)
 {
     return (a << 24) | (r << 16) | (g << 8) | (b << 0);
 }
+
+//------------------------------------------------------------------------------
+// term_blend
+//
+// Blend a source colour over a destination colour using the supplied alpha.
+//------------------------------------------------------------------------------
 
 u32 term_blend(u32 dest, u32 src, f32 alpha)
 {
@@ -92,12 +123,25 @@ u32 term_blend(u32 dest, u32 src, f32 alpha)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// term_fb_cls
+//
+// Clear the entire framebuffer to the supplied ink and paper colours.
+//------------------------------------------------------------------------------
+
 void term_fb_cls(u32 ink, u32 paper)
 {
     TermSize size = g_term_fb_size;
     TermRect rect = {0, 0, size.width, size.height};
     term_fb_rect(rect, ' ', ink, paper);
 }
+
+//------------------------------------------------------------------------------
+// term_fb_clip_rect
+//
+// Clip a rectangle to the framebuffer bounds and return both the clipped rect
+// and the local offset within the original rectangle.
+//------------------------------------------------------------------------------
 
 void term_fb_clip_rect(TermRect  rect,
                        TermRect* out_clipped_rect,
@@ -137,6 +181,12 @@ void term_fb_clip_rect(TermRect  rect,
     out_local_rect->height   = out_clipped_rect->height;
 }
 
+//------------------------------------------------------------------------------
+// term_fb_rect_ink
+//
+// Paint only the ink layer for a rectangular framebuffer region.
+//------------------------------------------------------------------------------
+
 void term_fb_rect_ink(TermRect rect, u32 colour)
 {
     TermRect clipped_rect, local_rect;
@@ -152,6 +202,12 @@ void term_fb_rect_ink(TermRect rect, u32 colour)
     }
 }
 
+//------------------------------------------------------------------------------
+// term_fb_rect_paper
+//
+// Paint only the paper layer for a rectangular framebuffer region.
+//------------------------------------------------------------------------------
+
 void term_fb_rect_paper(TermRect rect, u32 colour)
 {
     TermRect clipped_rect, local_rect;
@@ -166,6 +222,12 @@ void term_fb_rect_paper(TermRect rect, u32 colour)
         }
     }
 }
+
+//------------------------------------------------------------------------------
+// term_fb_rect_colour
+//
+// Paint both ink and paper layers for a rectangular framebuffer region.
+//------------------------------------------------------------------------------
 
 void term_fb_rect_colour(TermRect rect, u32 ink, u32 paper)
 {
@@ -183,6 +245,12 @@ void term_fb_rect_colour(TermRect rect, u32 ink, u32 paper)
     }
 }
 
+//------------------------------------------------------------------------------
+// term_fb_rect_char
+//
+// Paint only the character layer for a rectangular framebuffer region.
+//------------------------------------------------------------------------------
+
 void term_fb_rect_char(TermRect rect, u32 ch)
 {
     TermRect clipped_rect, local_rect;
@@ -197,6 +265,13 @@ void term_fb_rect_char(TermRect rect, u32 ch)
         }
     }
 }
+
+//------------------------------------------------------------------------------
+// term_fb_rect
+//
+// Paint the character, ink, and paper layers for a rectangular framebuffer
+// region.
+//------------------------------------------------------------------------------
 
 void term_fb_rect(TermRect rect, u32 ch, u32 ink, u32 paper)
 {
@@ -214,6 +289,13 @@ void term_fb_rect(TermRect rect, u32 ch, u32 ink, u32 paper)
         }
     }
 }
+
+//------------------------------------------------------------------------------
+// term_fb_9slice
+//
+// Draw a 9-slice border directly into the framebuffer using repeated edge and
+// centre glyphs.
+//------------------------------------------------------------------------------
 
 void term_fb_9slice(TermRect rect, cstr slices, bool fill_centre)
 {
@@ -247,6 +329,13 @@ void term_fb_9slice(TermRect rect, cstr slices, bool fill_centre)
             slices[4]);
     }
 }
+
+//------------------------------------------------------------------------------
+// term_utf8_next
+//
+// Decode the next UTF-8 codepoint from a string pointer and report its byte and
+// terminal-cell width.
+//------------------------------------------------------------------------------
 
 void term_utf8_next(cstr* s, u32* out_char, usize* out_bytes, usize* out_width)
 {
@@ -324,6 +413,13 @@ invalid:
     *out_width = 1;
     (*s)++;
 }
+
+//------------------------------------------------------------------------------
+// term_fb_write
+//
+// Write a UTF-8 string directly into the framebuffer, handling wide glyphs and
+// newlines.
+//------------------------------------------------------------------------------
 
 void term_fb_write(u16 x, u16 y, string str)
 {
@@ -470,10 +566,22 @@ void term_fb_write(u16 x, u16 y, string str)
     }
 }
 
+//------------------------------------------------------------------------------
+// term_fb_write_cstr
+//
+// Write a C-string directly into the framebuffer.
+//------------------------------------------------------------------------------
+
 void term_fb_write_cstr(u16 x, u16 y, cstr str)
 {
     term_fb_write(x, y, string_from_cstr(str));
 }
+
+//------------------------------------------------------------------------------
+// term_fb_formatv
+//
+// Format a string into the framebuffer using a `va_list`.
+//------------------------------------------------------------------------------
 
 void term_fb_formatv(u16 x, u16 y, cstr fmt, va_list args)
 {
@@ -482,6 +590,12 @@ void term_fb_formatv(u16 x, u16 y, cstr fmt, va_list args)
     cstr output = (cstr)g_term_arena.memory;
     term_fb_write_cstr(x, y, output);
 }
+
+//------------------------------------------------------------------------------
+// term_fb_format
+//
+// Format a string into the framebuffer.
+//------------------------------------------------------------------------------
 
 void term_fb_format(u16 x, u16 y, cstr fmt, ...)
 {
@@ -494,6 +608,12 @@ void term_fb_format(u16 x, u16 y, cstr fmt, ...)
 //------------------------------------------------------------------------------
 // Presentation
 
+//------------------------------------------------------------------------------
+// _term_fb_has_dirty
+//
+// Test whether any framebuffer cell has been marked dirty.
+//------------------------------------------------------------------------------
+
 bool _term_fb_has_dirty(void)
 {
     usize count = (usize)g_term_fb_size.width * (usize)g_term_fb_size.height;
@@ -504,6 +624,13 @@ bool _term_fb_has_dirty(void)
     }
     return false;
 }
+
+//------------------------------------------------------------------------------
+// _term_fb_present_now
+//
+// Flush the dirty framebuffer cells to the host terminal and then restore the
+// tracked cursor state.
+//------------------------------------------------------------------------------
 
 void _term_fb_present_now(void)
 {

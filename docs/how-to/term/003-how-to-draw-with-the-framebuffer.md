@@ -10,7 +10,8 @@ present the frame.
 ## Steps
 
 1. Start each frame with `term_fb_cls()`.
-2. Use `term_fb_rect()` or the per-layer rectangle helpers to paint areas.
+2. Use `term_fb_rect()`, `term_fb_9slice()`, or the per-layer rectangle helpers
+   to paint areas.
 3. Write text with `term_fb_write_cstr()`, `term_fb_write()`, or `term_fb_format()`.
 4. `term_loop()` flushes dirty framebuffer cells after your frame code runs.
 
@@ -60,6 +61,8 @@ int run(int argc, char** argv)
 
 - The framebuffer is clipped to the current terminal size automatically.
 - `term_fb_write()` handles UTF-8 and wide glyphs.
+- `term_fb_9slice()` is useful for borders and frames when you want to draw
+  directly to the framebuffer without introducing a `TermWindow`.
 - Framebuffer presentation is driven by `term_loop()` and still only flushes dirty cells, so changing less of the framebuffer reduces terminal output.
 - The framebuffer write functions do not parse ANSI escape sequences. If you want inline ANSI colours, use `TermWindow` text APIs instead.
 

@@ -30,10 +30,23 @@ internal void _term_console_load_input(TermConsole* console, string str);
 internal string _term_console_dup_string(string str);
 internal void _term_console_set_bytes(Array(u8)* bytes, string str);
 
+//------------------------------------------------------------------------------
+// _term_console_is_word_byte
+//
+// Test whether a byte should be treated as part of a word during cursor motion
+// and deletion commands.
+//------------------------------------------------------------------------------
+
 internal bool _term_console_is_word_byte(u8 ch)
 {
     return isalnum((unsigned char)ch) || ch == '_';
 }
+
+//------------------------------------------------------------------------------
+// _term_console_insert_byte
+//
+// Insert a byte into the editable input buffer at the current cursor position.
+//------------------------------------------------------------------------------
 
 internal void _term_console_insert_byte(TermConsole* console, u8 ch)
 {
@@ -49,6 +62,12 @@ internal void _term_console_insert_byte(TermConsole* console, u8 ch)
     console->input[pos] = ch;
     console->input_cursor = pos + 1;
 }
+
+//------------------------------------------------------------------------------
+// _term_console_delete_range
+//
+// Delete a half-open range from the editable input buffer.
+//------------------------------------------------------------------------------
 
 internal void _term_console_delete_range(TermConsole* console,
                                          usize        start,
@@ -68,6 +87,12 @@ internal void _term_console_delete_range(TermConsole* console,
     console->input_cursor = start;
 }
 
+//------------------------------------------------------------------------------
+// _term_console_word_left
+//
+// Find the previous word boundary from the supplied cursor position.
+//------------------------------------------------------------------------------
+
 internal usize _term_console_word_left(const TermConsole* console, usize cursor)
 {
     usize pos = MIN(cursor, array_count(console->input));
@@ -85,6 +110,12 @@ internal usize _term_console_word_left(const TermConsole* console, usize cursor)
 
     return pos;
 }
+
+//------------------------------------------------------------------------------
+// _term_console_word_right
+//
+// Find the next word boundary from the supplied cursor position.
+//------------------------------------------------------------------------------
 
 internal usize _term_console_word_right(const TermConsole* console, usize cursor)
 {
@@ -108,6 +139,13 @@ internal usize _term_console_word_right(const TermConsole* console, usize cursor
     return pos;
 }
 
+//------------------------------------------------------------------------------
+// _term_console_load_history_entry
+//
+// Load either the currently selected history item or the saved draft into the
+// editable input buffer.
+//------------------------------------------------------------------------------
+
 internal void _term_console_load_history_entry(TermConsole* console)
 {
     if (console->input_history_index < 0) {
@@ -123,6 +161,12 @@ internal void _term_console_load_history_entry(TermConsole* console)
         _term_console_load_input(console, console->input_history[index]);
     }
 }
+
+//------------------------------------------------------------------------------
+// _term_console_history_up
+//
+// Move backward through input history, saving the current draft on first use.
+//------------------------------------------------------------------------------
 
 internal void _term_console_history_up(TermConsole* console)
 {
@@ -143,6 +187,12 @@ internal void _term_console_history_up(TermConsole* console)
     _term_console_load_history_entry(console);
 }
 
+//------------------------------------------------------------------------------
+// _term_console_history_down
+//
+// Move forward through input history, restoring the saved draft at the end.
+//------------------------------------------------------------------------------
+
 internal void _term_console_history_down(TermConsole* console)
 {
     if (console->input_history_index < 0) {
@@ -158,11 +208,23 @@ internal void _term_console_history_down(TermConsole* console)
     _term_console_load_history_entry(console);
 }
 
+//------------------------------------------------------------------------------
+// _term_console_load_input
+//
+// Replace the editable input buffer and move the cursor to its end.
+//------------------------------------------------------------------------------
+
 internal void _term_console_load_input(TermConsole* console, string str)
 {
     _term_console_set_bytes(&console->input, str);
     console->input_cursor = array_count(console->input);
 }
+
+//------------------------------------------------------------------------------
+// _term_console_accept_input
+//
+// Commit the current input line and reset editing state for the next prompt.
+//------------------------------------------------------------------------------
 
 internal void _term_console_accept_input(TermConsole* console)
 {
@@ -192,6 +254,12 @@ internal void _term_console_accept_input(TermConsole* console)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// _term_console_focus
+//
+// Make this console the globally focused console so it owns the host cursor.
+//------------------------------------------------------------------------------
+
 internal void _term_console_focus(TermConsole* console)
 {
     if (!console->input_enabled) {
@@ -209,146 +277,11 @@ internal void _term_console_focus(TermConsole* console)
 
 //------------------------------------------------------------------------------
 
-internal u32 _term_console_ansi_palette(int index)
-{
-    static const u32 palette[16] = {
-        0xFF000000,
-        0xFF800000,
-        0xFF008000,
-        0xFF808000,
-        0xFF000080,
-        0xFF800080,
-        0xFF008080,
-        0xFFC0C0C0,
-        0xFF808080,
-        0xFFFF0000,
-        0xFF00FF00,
-        0xFFFFFF00,
-        0xFF0000FF,
-        0xFFFF00FF,
-        0xFF00FFFF,
-        0xFFFFFFFF,
-    };
-
-    index = CLAMP(index, 0, 15);
-    return palette[index];
-}
-
-internal u32 _term_console_ansi_256_colour(int index)
-{
-    static const u8 cube_levels[6] = {0, 95, 135, 175, 215, 255};
-
-    if (index < 16) {
-        return _term_console_ansi_palette(index);
-    }
-
-    if (index < 232) {
-        int base = index - 16;
-        return term_rgb(cube_levels[base / 36],
-                        cube_levels[(base / 6) % 6],
-                        cube_levels[base % 6]);
-    }
-
-    index = CLAMP(index, 232, 255);
-    u8 grey = (u8)(8 + ((index - 232) * 10));
-    return term_rgb(grey, grey, grey);
-}
-
-internal void _term_console_apply_sgr(int  params[],
-                                      int  count,
-                                      u32  base_ink,
-                                      u32  base_paper,
-                                      u32* io_ink,
-                                      u32* io_paper)
-{
-    if (count == 0) {
-        *io_ink   = base_ink;
-        *io_paper = base_paper;
-        return;
-    }
-
-    for (int i = 0; i < count; i++) {
-        int code = params[i];
-
-        if (code == 0) {
-            *io_ink   = base_ink;
-            *io_paper = base_paper;
-        } else if (code >= 30 && code <= 37) {
-            *io_ink = _term_console_ansi_palette(code - 30);
-        } else if (code >= 90 && code <= 97) {
-            *io_ink = _term_console_ansi_palette((code - 90) + 8);
-        } else if (code >= 40 && code <= 47) {
-            *io_paper = _term_console_ansi_palette(code - 40);
-        } else if (code >= 100 && code <= 107) {
-            *io_paper = _term_console_ansi_palette((code - 100) + 8);
-        } else if (code == 39) {
-            *io_ink = base_ink;
-        } else if (code == 49) {
-            *io_paper = base_paper;
-        } else if ((code == 38 || code == 48) && i + 1 < count) {
-            u32* target = code == 38 ? io_ink : io_paper;
-            int  mode   = params[++i];
-
-            if (mode == 5 && i + 1 < count) {
-                *target = _term_console_ansi_256_colour(params[++i]);
-            } else if (mode == 2 && i + 3 < count) {
-                int raw_r = params[++i];
-                int raw_g = params[++i];
-                int raw_b = params[++i];
-                int r     = CLAMP(raw_r, 0, 255);
-                int g     = CLAMP(raw_g, 0, 255);
-                int b     = CLAMP(raw_b, 0, 255);
-                *target = term_rgb((u8)r, (u8)g, (u8)b);
-            }
-        }
-    }
-}
-
-internal usize _term_console_try_parse_sgr(const u8* s,
-                                           const u8* end,
-                                           u32       base_ink,
-                                           u32       base_paper,
-                                           u32*      io_ink,
-                                           u32*      io_paper)
-{
-    int       params[16];
-    int       count      = 0;
-    int       current    = 0;
-    bool      have_digit = false;
-    const u8* p          = s;
-
-    if ((usize)(end - s) < 2 || p[0] != '\033' || p[1] != '[') {
-        return 0;
-    }
-    p += 2;
-
-    while (p < end) {
-        u8 ch = *p;
-        if (ch >= '0' && ch <= '9') {
-            current    = current * 10 + (int)(ch - '0');
-            have_digit = true;
-            p++;
-        } else if (ch == ';') {
-            if (count < ARRAY_COUNT(params)) {
-                params[count++] = have_digit ? current : 0;
-            }
-            current    = 0;
-            have_digit = false;
-            p++;
-        } else if (ch == 'm') {
-            if (count < ARRAY_COUNT(params)) {
-                params[count++] = have_digit ? current : 0;
-            }
-            _term_console_apply_sgr(
-                params, count, base_ink, base_paper, io_ink, io_paper);
-            return (usize)((p + 1) - s);
-        } else {
-            return 0;
-        }
-    }
-
-    return 0;
-}
+//------------------------------------------------------------------------------
+// _term_console_dup_string
+//
+// Allocate and return an owned copy of the supplied string.
+//------------------------------------------------------------------------------
 
 internal string _term_console_dup_string(string str)
 {
@@ -363,6 +296,12 @@ internal string _term_console_dup_string(string str)
     return copy;
 }
 
+//------------------------------------------------------------------------------
+// _term_console_set_bytes
+//
+// Replace a dynamic byte buffer with a copy of the supplied string contents.
+//------------------------------------------------------------------------------
+
 internal void _term_console_set_bytes(Array(u8)* bytes, string str)
 {
     array_free(*bytes);
@@ -374,6 +313,12 @@ internal void _term_console_set_bytes(Array(u8)* bytes, string str)
     memcpy(*bytes, str.data, str.count);
 }
 
+//------------------------------------------------------------------------------
+// _term_console_discard_oldest
+//
+// Trim output history chunks so they stay within the configured limit.
+//------------------------------------------------------------------------------
+
 internal void _term_console_discard_oldest(TermConsole* console)
 {
     while (console->history_size > 0 &&
@@ -382,6 +327,12 @@ internal void _term_console_discard_oldest(TermConsole* console)
         array_delete(console->history, 0);
     }
 }
+
+//------------------------------------------------------------------------------
+// _term_console_push_history
+//
+// Append a chunk to the output history and enforce the history limit.
+//------------------------------------------------------------------------------
 
 internal void _term_console_push_history(TermConsole* console,
                                          string       str,
@@ -396,6 +347,13 @@ internal void _term_console_push_history(TermConsole* console,
                                    .wrap = wrap}));
     _term_console_discard_oldest(console);
 }
+
+//------------------------------------------------------------------------------
+// _term_console_append_history
+//
+// Append output while preserving the current viewport position when auto-scroll
+// is paused.
+//------------------------------------------------------------------------------
 
 internal void _term_console_append_history(
     TermConsole* console, string str, bool wrap)
@@ -420,6 +378,12 @@ internal void _term_console_append_history(
     }
 }
 
+//------------------------------------------------------------------------------
+// _term_console_put_cell
+//
+// Write a glyph into the window buffer, including wide-character tail cells.
+//------------------------------------------------------------------------------
+
 internal void _term_console_put_cell(
     TermWindow* window, int x, int y, u32 ch, usize width, u32 ink, u32 paper)
 {
@@ -441,6 +405,12 @@ internal void _term_console_put_cell(
     }
 }
 
+//------------------------------------------------------------------------------
+// _term_console_measure_output
+//
+// Measure the number of visual rows occupied by the current output history.
+//------------------------------------------------------------------------------
+
 internal void _term_console_measure_output(const TermConsole* console,
                                            int                width,
                                            usize*             out_rows)
@@ -457,12 +427,12 @@ internal void _term_console_measure_output(const TermConsole* console,
         u32              current_paper = COLOUR_BLACK;
 
         while (s < end) {
-            usize sgr_bytes = _term_console_try_parse_sgr(s,
-                                                          end,
-                                                          console->output_colour,
-                                                          COLOUR_BLACK,
-                                                          &current_ink,
-                                                          &current_paper);
+            usize sgr_bytes = _term_try_parse_sgr(s,
+                                                  end,
+                                                  console->output_colour,
+                                                  COLOUR_BLACK,
+                                                  &current_ink,
+                                                  &current_paper);
             if (sgr_bytes != 0) {
                 any = true;
                 s += sgr_bytes;
@@ -507,6 +477,12 @@ internal void _term_console_measure_output(const TermConsole* console,
     *out_rows = any ? rows : 0;
 }
 
+//------------------------------------------------------------------------------
+// _term_console_input_rows
+//
+// Compute how many rows are needed for the prompt and editable input.
+//------------------------------------------------------------------------------
+
 internal usize _term_console_input_rows(const TermConsole* console, int width)
 {
     if (!console->input_enabled || width <= 0) {
@@ -516,6 +492,12 @@ internal usize _term_console_input_rows(const TermConsole* console, int width)
     usize cols = array_count(console->prompt) + array_count(console->input);
     return MAX((cols + (usize)width - 1) / (usize)width, 1);
 }
+
+//------------------------------------------------------------------------------
+// _term_console_draw_output
+//
+// Draw the visible slice of output history into the backing window.
+//------------------------------------------------------------------------------
 
 internal void _term_console_draw_output(const TermConsole* console,
                                         usize              start_row,
@@ -538,12 +520,12 @@ internal void _term_console_draw_output(const TermConsole* console,
         u32              current_paper = COLOUR_BLACK;
 
         while (s < end) {
-            usize sgr_bytes = _term_console_try_parse_sgr(s,
-                                                          end,
-                                                          console->output_colour,
-                                                          COLOUR_BLACK,
-                                                          &current_ink,
-                                                          &current_paper);
+            usize sgr_bytes = _term_try_parse_sgr(s,
+                                                  end,
+                                                  console->output_colour,
+                                                  COLOUR_BLACK,
+                                                  &current_ink,
+                                                  &current_paper);
             if (sgr_bytes != 0) {
                 s += sgr_bytes;
                 continue;
@@ -590,6 +572,13 @@ internal void _term_console_draw_output(const TermConsole* console,
         }
     }
 }
+
+//------------------------------------------------------------------------------
+// _term_console_draw_input
+//
+// Draw the prompt and editable input line and place the host cursor when this
+// console has focus.
+//------------------------------------------------------------------------------
 
 internal void _term_console_draw_input(TermConsole* console, usize start_row)
 {
@@ -651,6 +640,12 @@ internal void _term_console_draw_input(TermConsole* console, usize start_row)
     }
 }
 
+//------------------------------------------------------------------------------
+// _term_console_draw_scrollbar
+//
+// Draw the scrollbar when the viewport is scrolled away from the live bottom.
+//------------------------------------------------------------------------------
+
 internal void _term_console_draw_scrollbar(const TermConsole* console,
                                            TermConsoleLayout   layout)
 {
@@ -691,6 +686,13 @@ internal void _term_console_draw_scrollbar(const TermConsole* console,
     }
 }
 
+//------------------------------------------------------------------------------
+// _term_console_layout
+//
+// Calculate the output, input, and scrollbar layout for the current window
+// size and scroll state.
+//------------------------------------------------------------------------------
+
 internal TermConsoleLayout _term_console_layout(const TermConsole* console)
 {
     TermConsoleLayout layout = {0};
@@ -719,6 +721,13 @@ internal TermConsoleLayout _term_console_layout(const TermConsole* console)
             : 0;
     return layout;
 }
+
+//------------------------------------------------------------------------------
+// _term_console_redraw
+//
+// Rebuild the console window contents from output history, scrollbar, and
+// input state.
+//------------------------------------------------------------------------------
 
 internal void _term_console_redraw(TermConsole* console)
 {
@@ -760,6 +769,13 @@ internal void _term_console_redraw(TermConsole* console)
 
 //------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
+// term_console_init
+//
+// Initialise a console over an existing window and configure its default
+// colours and history size.
+//------------------------------------------------------------------------------
+
 void term_console_init(TermConsole* console,
                        TermWindow*  window,
                        u32          history_size)
@@ -778,6 +794,13 @@ void term_console_init(TermConsole* console,
     console->input_history_index = -1;
     _term_console_redraw(console);
 }
+
+//------------------------------------------------------------------------------
+// term_console_done
+//
+// Release all storage owned by the console and drop focus if it owns the host
+// cursor.
+//------------------------------------------------------------------------------
 
 void term_console_done(TermConsole* console)
 {
@@ -801,6 +824,12 @@ void term_console_done(TermConsole* console)
     memset(console, 0, sizeof(*console));
 }
 
+//------------------------------------------------------------------------------
+// term_console_enable_input
+//
+// Enable or disable interactive input for the console.
+//------------------------------------------------------------------------------
+
 void term_console_enable_input(TermConsole* console, bool enable)
 {
     console->input_enabled = enable;
@@ -812,11 +841,23 @@ void term_console_enable_input(TermConsole* console, bool enable)
     _term_console_redraw(console);
 }
 
+//------------------------------------------------------------------------------
+// term_console_set_output_colour
+//
+// Set the base output colour used when ANSI sequences do not override it.
+//------------------------------------------------------------------------------
+
 void term_console_set_output_colour(TermConsole* console, u32 colour)
 {
     console->output_colour = colour;
     _term_console_redraw(console);
 }
+
+//------------------------------------------------------------------------------
+// term_console_set_prompt_colour
+//
+// Set the colour used for the prompt.
+//------------------------------------------------------------------------------
 
 void term_console_set_prompt_colour(TermConsole* console, u32 colour)
 {
@@ -824,11 +865,23 @@ void term_console_set_prompt_colour(TermConsole* console, u32 colour)
     _term_console_redraw(console);
 }
 
+//------------------------------------------------------------------------------
+// term_console_set_input_colour
+//
+// Set the colour used for editable input text and the input cursor.
+//------------------------------------------------------------------------------
+
 void term_console_set_input_colour(TermConsole* console, u32 colour)
 {
     console->input_colour = colour;
     _term_console_redraw(console);
 }
+
+//------------------------------------------------------------------------------
+// term_console_set_prompt
+//
+// Replace the prompt text displayed before the editable input.
+//------------------------------------------------------------------------------
 
 void term_console_set_prompt(TermConsole* console, string prompt)
 {
@@ -836,11 +889,23 @@ void term_console_set_prompt(TermConsole* console, string prompt)
     _term_console_redraw(console);
 }
 
+//------------------------------------------------------------------------------
+// term_console_resize
+//
+// Resize the underlying window and redraw the console contents to match.
+//------------------------------------------------------------------------------
+
 void term_console_resize(TermConsole* console, TermRect new_rect)
 {
     term_window_resize(console->window, new_rect);
     _term_console_redraw(console);
 }
+
+//------------------------------------------------------------------------------
+// term_console_clear
+//
+// Clear the output history and reset scrolling back to the live bottom.
+//------------------------------------------------------------------------------
 
 void term_console_clear(TermConsole* console)
 {
@@ -853,16 +918,34 @@ void term_console_clear(TermConsole* console)
     _term_console_redraw(console);
 }
 
+//------------------------------------------------------------------------------
+// term_console_write
+//
+// Append a non-wrapping output chunk to the console history.
+//------------------------------------------------------------------------------
+
 void term_console_write(TermConsole* console, string str)
 {
     _term_console_append_history(console, str, false);
     _term_console_redraw(console);
 }
 
+//------------------------------------------------------------------------------
+// term_console_write_cstr
+//
+// Append a non-wrapping C string to the console history.
+//------------------------------------------------------------------------------
+
 void term_console_write_cstr(TermConsole* console, cstr string)
 {
     term_console_write(console, string_from_cstr(string));
 }
+
+//------------------------------------------------------------------------------
+// term_console_write_wrap
+//
+// Append an output chunk that may wrap across multiple visual rows.
+//------------------------------------------------------------------------------
 
 void term_console_write_wrap(TermConsole* console, string str)
 {
@@ -870,11 +953,23 @@ void term_console_write_wrap(TermConsole* console, string str)
     _term_console_redraw(console);
 }
 
+//------------------------------------------------------------------------------
+// term_console_formatv
+//
+// Format a non-wrapping output chunk from a `va_list`.
+//------------------------------------------------------------------------------
+
 void term_console_formatv(TermConsole* console, cstr fmt, va_list args)
 {
     string formatted = string_formatv(temp_arena(), fmt, args);
     term_console_write(console, formatted);
 }
+
+//------------------------------------------------------------------------------
+// term_console_format
+//
+// Format and append a non-wrapping output chunk.
+//------------------------------------------------------------------------------
 
 void term_console_format(TermConsole* console, cstr fmt, ...)
 {
@@ -884,11 +979,23 @@ void term_console_format(TermConsole* console, cstr fmt, ...)
     va_end(args);
 }
 
+//------------------------------------------------------------------------------
+// term_console_formatv_wrap
+//
+// Format a wrapping output chunk from a `va_list`.
+//------------------------------------------------------------------------------
+
 void term_console_formatv_wrap(TermConsole* console, cstr fmt, va_list args)
 {
     string formatted = string_formatv(temp_arena(), fmt, args);
     term_console_write_wrap(console, formatted);
 }
+
+//------------------------------------------------------------------------------
+// term_console_format_wrap
+//
+// Format and append a wrapping output chunk.
+//------------------------------------------------------------------------------
 
 void term_console_format_wrap(TermConsole* console, cstr fmt, ...)
 {
@@ -897,6 +1004,13 @@ void term_console_format_wrap(TermConsole* console, cstr fmt, ...)
     term_console_formatv_wrap(console, fmt, args);
     va_end(args);
 }
+
+//------------------------------------------------------------------------------
+// term_console_send_event
+//
+// Feed a terminal event into the console, updating focus, scrolling, and
+// input-editing state as needed.
+//------------------------------------------------------------------------------
 
 void term_console_send_event(TermConsole* console, TermEvent event)
 {
@@ -1009,6 +1123,13 @@ void term_console_send_event(TermConsole* console, TermEvent event)
     _term_console_redraw(console);
 }
 
+//------------------------------------------------------------------------------
+// term_console_unfocus
+//
+// Release focus from this console and hide the host cursor until another
+// console claims it.
+//------------------------------------------------------------------------------
+
 void term_console_unfocus(TermConsole* console)
 {
     if (g_term_focused_console == console) {
@@ -1018,6 +1139,12 @@ void term_console_unfocus(TermConsole* console)
     term_cursor_hide();
     _term_console_redraw(console);
 }
+
+//------------------------------------------------------------------------------
+// term_console_get_input
+//
+// Return the most recently accepted input line, if one is pending.
+//------------------------------------------------------------------------------
 
 bool term_console_get_input(TermConsole* console, string* out_input)
 {
