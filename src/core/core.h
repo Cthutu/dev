@@ -664,6 +664,9 @@ usize string_character_count(string str);
 // Calculate the number of lines in a string
 usize string_line_count(string str);
 
+// Return true if the string is empty.
+bool string_empty(string str);
+
 //------------------------------------------------------------------------------
 // String processing
 
